@@ -7,7 +7,7 @@
 - 支持 `np.random.randn`、`np.random.rand`、`np.zeros` 和 `np.ones` 三维表达式
 - 根据表达式动态生成三维形状和数据，每个维度支持 1—6
 - 每个小方块显示对应的浮点数值
-- 可分别隐藏 `a[0, :, :]`、`a[1, :, :]` 等矩阵面
+- 可分别隐藏 `a[0, :, :]`、`a[1, :, :]` 等矩阵面；第 1 面从默认视角的左后侧开始
 - 隐藏后不显示数字和表面，只保留透明的空间边框
 - 支持同时隐藏多个面，并可一键全部显示
 - 支持拖动旋转、滚轮缩放、触摸操作和单元间距调整
@@ -26,6 +26,8 @@ npm ci
 npm run build
 HOST=127.0.0.1 PORT=3011 node backend/server.js
 ```
+
+`backend/server.js` 会同时处理服务端渲染和 `dist/client` 中的 CSS、JavaScript、字体等静态资源。
 
 ## Ubuntu 服务器部署
 
