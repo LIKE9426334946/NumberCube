@@ -1,6 +1,6 @@
 "use client";
 
-import { Brand, CubeStage, formatShape, ShapeBadge, useCubeState } from "./cube";
+import { Brand, CubeStage, SceneBadge, useCubeState } from "./cube";
 
 export default function Home() {
   const [state, setState] = useCubeState();
@@ -11,7 +11,7 @@ export default function Home() {
         <Brand />
         <div className="topbar-actions">
           <a className="page-link" href="/control">控制页</a>
-          <ShapeBadge shape={state.shape} />
+          <SceneBadge state={state} />
         </div>
       </header>
 
@@ -20,8 +20,8 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>{`a.shape = ${formatShape(state.shape)}`}</span>
-        <span>拖动旋转 · 滚轮缩放</span>
+        <span>{`${state.arrays.length} ARRAY${state.arrays.length === 1 ? "" : "S"}`}</span>
+        <span>{state.interactionMode === "move" ? "拖动目标魔方进行移动 · 滚轮缩放" : "拖动空白或魔方旋转视角 · 滚轮缩放"}</span>
       </footer>
     </main>
   );
