@@ -56,6 +56,33 @@ button, input { font: inherit; }
   backdrop-filter: blur(18px);
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.page-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid rgba(126, 158, 255, 0.24);
+  border-radius: 999px;
+  color: #91a9ff;
+  background: rgba(94, 125, 226, 0.06);
+  font-size: 10px;
+  text-decoration: none;
+  transition: 160ms ease;
+}
+
+.page-link:hover {
+  border-color: rgba(126, 158, 255, 0.55);
+  color: #eef4ff;
+  background: rgba(94, 125, 226, 0.14);
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -110,6 +137,25 @@ button, input { font: inherit; }
   gap: clamp(40px, 5.5vw, 88px);
   padding: 44px 0;
 }
+
+.display-workspace {
+  width: min(1360px, calc(100% - 48px));
+  margin: auto;
+  padding: 28px 0;
+}
+
+.display-page .stage-card {
+  min-height: min(760px, calc(100vh - 184px));
+}
+
+.control-workspace {
+  width: min(760px, calc(100% - 48px));
+  margin: auto;
+  padding: 52px 0 68px;
+}
+
+.control-intro { max-width: none; }
+.control-intro .description { max-width: 620px; }
 
 .intro { max-width: 520px; }
 
@@ -319,6 +365,15 @@ h1 {
 
 .legend span { display: flex; align-items: center; gap: 8px; }
 
+.sync-dot {
+  width: 7px;
+  height: 7px;
+  display: inline-block;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px rgba(107, 225, 255, 0.8);
+}
+
 .mouse-icon, .wheel-icon {
   width: 11px;
   height: 16px;
@@ -506,11 +561,20 @@ footer {
   .workspace { grid-template-columns: 1fr; padding: 46px 0 60px; }
   .intro { max-width: 670px; }
   .stage-card { min-height: 640px; }
+  .display-page .stage-card { min-height: calc(100vh - 184px); }
 }
 
 @media (max-width: 560px) {
   .topbar { height: 66px; }
   .workspace { width: min(100% - 28px, 520px); gap: 36px; padding-top: 36px; }
+  .display-workspace,
+  .control-workspace { width: min(100% - 28px, 680px); }
+  .display-workspace { padding: 18px 0; }
+  .control-workspace { padding: 36px 0 52px; }
+  .display-page .stage-card { min-height: calc(100vh - 156px); }
+  .topbar-actions { gap: 6px; }
+  .page-link { padding: 0 9px; }
+  .matrix-badge { padding: 8px 9px; font-size: 10px; }
   h1 { font-size: 42px; }
   .description { font-size: 13px; }
   .expression-row { flex-direction: column; }
