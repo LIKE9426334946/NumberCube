@@ -7,6 +7,8 @@ export type Rotation = { x: number; y: number };
 export type CubeState = {
   shape: number[];
   seed: number;
+  values: number[] | null;
+  sourceName: string | null;
   hiddenLayers: number[];
   rotation: Rotation;
   zoom: number;
@@ -32,6 +34,8 @@ export const defaultRotation: Rotation = { x: -24, y: -38 };
 export const defaultCubeState: CubeState = {
   shape: [3, 3, 3],
   seed: 11,
+  values: null,
+  sourceName: null,
   hiddenLayers: [],
   rotation: { ...defaultRotation },
   zoom: 0.95,
@@ -54,6 +58,67 @@ export function parseShapeInput(input: string) {
   }
 
   return { shape };
+}
+
+type ParsedJsonArray = { shape: number[]; values: number[] };
+
+export function parseJsonArrayData(value: unknown): ParsedJsonArray | { error: string } {
+  if (!Array.isArray(value)) {
+    return { error: "JSON 顶层必须是一个数组。" };
+  }
+
+  const walk = (item: unknown, depth = 0): ParsedJsonArray | { error: string } => {
+    if (typeof item === "number") {
+      return Number.isFinite(item)
+        ? { shape: [], values: [item] }
+        : { error: "数组中只能包含有限数字。" };
+    }
+    if (!Array.isArray(item)) {
+      return { error: "数组中只能包含数字或嵌套数组。" };
+    }
+    if (depth >= 4) {
+      return { error: "目前仅支持 1—4 维 JSON 数组。" };
+    }
+    if (item.length === 0) {
+      return { error: "每个维度都必须至少包含 1 个元素。" };
+    }
+    if (item.length > 6) {
+      return { error: "每个维度目前支持 1—6，避免一次生成过多单元。" };
+    }
+
+    const children = item.map((child) => walk(child, depth + 1));
+    const failed = children.find((child) => "error" in child);
+    if (failed && "error" in failed) return failed;
+
+    const parsedChildren = children as ParsedJsonArray[];
+    const childShape = parsedChildren[0].shape;
+    const hasRaggedRows = parsedChildren.some(
+      (child) => child.shape.length !== childShape.length
+        || child.shape.some((size, index) => size !== childShape[index]),
+    );
+    if (hasRaggedRows) {
+      return { error: "JSON 必须是规则的矩形数组，各行长度需要一致。" };
+    }
+
+    return {
+      shape: [item.length, ...childShape],
+      values: parsedChildren.flatMap((child) => child.values),
+    };
+  };
+
+  const parsed = walk(value);
+  if ("error" in parsed) return parsed;
+  if (parsed.shape.length < 1 || parsed.shape.length > 4) {
+    return { error: "目前仅支持 1—4 维 JSON 数组。" };
+  }
+  if (parsed.shape.some((size) => size > 6)) {
+    return { error: "每个维度目前支持 1—6，避免一次生成过多单元。" };
+  }
+  if (parsed.values.length > 216) {
+    return { error: "单元总数不能超过 216。" };
+  }
+
+  return parsed;
 }
 
 export function getArrayLayout(shape: number[]): ArrayLayout {
@@ -107,10 +172,21 @@ function normalizeState(value: unknown): CubeState {
     && Number.isFinite(stored.rotation.y)
       ? stored.rotation
       : defaultRotation;
+  const totalCells = shape.reduce((total, size) => total * size, 1);
+  const values = Array.isArray(stored.values)
+    && stored.values.length === totalCells
+    && stored.values.every((item) => typeof item === "number" && Number.isFinite(item))
+      ? stored.values
+      : null;
+  const sourceName = values && typeof stored.sourceName === "string"
+    ? stored.sourceName.slice(0, 120)
+    : null;
 
   return {
     shape,
     seed: Number.isFinite(stored.seed) ? Number(stored.seed) : defaultCubeState.seed,
+    values,
+    sourceName,
     hiddenLayers,
     rotation,
     zoom: Number.isFinite(stored.zoom)
@@ -191,6 +267,14 @@ function formatValue(value: number) {
   return (Math.abs(value) < 0.005 ? 0 : value).toFixed(2);
 }
 
+function formatImportedValue(value: number) {
+  if (Number.isInteger(value)) return String(value);
+  if (Math.abs(value) >= 10000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) {
+    return value.toExponential(2);
+  }
+  return String(Number(value.toFixed(3)));
+}
+
 export function Brand() {
   return (
     <div className="brand">
@@ -259,7 +343,9 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
         key: `${cube}-${layer}-${row}-${column}`,
         cube,
         layer,
-        value: formatValue(createValue(index, state.seed)),
+        value: state.values
+          ? formatImportedValue(state.values[index])
+          : formatValue(createValue(index, state.seed)),
         x: x + cubeOffsetX,
         y: y + cubeOffsetY,
         z,
@@ -274,6 +360,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
       layers,
       rows,
       state.seed,
+      state.values,
       totalCells,
     ],
   );
@@ -309,6 +396,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
     <div className="stage-card">
       <div className="stage-label">
         ARRAY / SHAPE {formattedShape}{dimensionCount === 4 ? ` · ${cubeCount} CUBES` : ""}
+        {state.values ? " · JSON" : ""}
       </div>
       <div
         className="cube-stage"

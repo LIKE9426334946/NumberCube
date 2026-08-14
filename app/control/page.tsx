@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
+import Link from "next/link";
 import {
   Brand,
   defaultRotation,
   formatShape,
   getArrayLayout,
   getFitZoom,
+  parseJsonArrayData,
   parseShapeInput,
   ShapeBadge,
   useCubeState,
@@ -17,6 +19,7 @@ export default function ControlPage() {
   const [state, setState] = useCubeState();
   const [shapeInput, setShapeInput] = useState(state.shape.join(","));
   const [error, setError] = useState("");
+  const [jsonStatus, setJsonStatus] = useState("");
   const dimensionCount = state.shape.length;
   const { layers } = getArrayLayout(state.shape);
   const totalCells = state.shape.reduce((total, size) => total * size, 1);
@@ -46,10 +49,52 @@ export default function ControlPage() {
       ...current,
       shape: parsed.shape,
       seed: current.seed + 1,
+      values: null,
+      sourceName: null,
       hiddenLayers: [],
       zoom: getFitZoom(parsed.shape),
     }));
     setError("");
+    setJsonStatus("");
+  };
+
+  const importJson = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      if (file.size > 1_000_000) {
+        setJsonStatus("JSON 文件不能超过 1 MB。");
+        return;
+      }
+      const fileContents = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsText(file);
+      });
+      const parsed = parseJsonArrayData(JSON.parse(fileContents));
+      if ("error" in parsed) {
+        setJsonStatus(parsed.error);
+        return;
+      }
+
+      setState((current) => ({
+        ...current,
+        shape: parsed.shape,
+        values: parsed.values,
+        sourceName: file.name,
+        hiddenLayers: [],
+        zoom: getFitZoom(parsed.shape),
+      }));
+      setShapeInput(parsed.shape.join(","));
+      setError("");
+      setJsonStatus(`已读取 ${file.name} · shape = ${formatShape(parsed.shape)} · ${parsed.values.length} 个数据`);
+    } catch {
+      setJsonStatus("无法解析该文件，请确认它是有效的 JSON。");
+    } finally {
+      event.target.value = "";
+    }
   };
 
   const toggleLayer = (layer: number) => {
@@ -75,7 +120,7 @@ export default function ControlPage() {
       <header className="topbar">
         <Brand />
         <div className="topbar-actions">
-          <a className="page-link" href="/">展示页</a>
+          <Link className="page-link" href="/">展示页</Link>
           <ShapeBadge shape={state.shape} />
         </div>
       </header>
@@ -106,6 +151,30 @@ export default function ControlPage() {
               {error || `shape = ${formatShape(state.shape)} · dtype = float64 · ${totalCells} 个单元`}
             </p>
           </form>
+
+          <section className="json-import-panel" aria-labelledby="json-import-title">
+            <div className="json-import-copy">
+              <p id="json-import-title">JSON 数据</p>
+              <span>支持 1—4 维规则嵌套数字列表，选择文件后自动识别形状。</span>
+            </div>
+            <label className="json-file-button">
+              <span>导入 JSON</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                onChange={importJson}
+                aria-label="导入 JSON 文件"
+              />
+            </label>
+            {(jsonStatus || state.sourceName) && (
+              <p
+                className={jsonStatus && !jsonStatus.startsWith("已读取") ? "json-status is-error" : "json-status"}
+                aria-live="polite"
+              >
+                {jsonStatus || `当前数据：${state.sourceName}`}
+              </p>
+            )}
+          </section>
 
           <div className="slice-panel">
             <div className="panel-heading">
