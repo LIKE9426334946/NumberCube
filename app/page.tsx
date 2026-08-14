@@ -4,33 +4,63 @@ import { useMemo, useRef, useState } from "react";
 import type { FormEvent, PointerEvent, WheelEvent } from "react";
 
 type Rotation = { x: number; y: number };
-type Shape = [number, number, number];
-type DataMode = "randn" | "rand" | "zeros" | "ones";
-type MatrixState = { shape: Shape; mode: DataMode; seed: number };
+type Shape = number[];
+type MatrixState = { shape: Shape; seed: number };
+type ArrayLayout = {
+  cubeCount: number;
+  layers: number;
+  rows: number;
+  columns: number;
+};
 
 const faces = ["front", "back", "right", "left", "top", "bottom"];
-const defaultExpression = "a=np.random.randn(3,3,3)";
+const defaultShape = "3,3,3";
 
-function parseNumpyExpression(expression: string) {
-  const pattern = /^(?:[a-zA-Z_]\w*\s*=\s*)?np\.(?:(random\.)?(randn|rand)|(zeros|ones))\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/;
-  const match = expression.trim().match(pattern);
+function parseShapeInput(input: string) {
+  const parts = input.trim().replaceAll("，", ",").split(",");
 
-  if (!match) {
-    return { error: "请输入三维 NumPy 表达式，例如 a=np.random.randn(3,4,5)" };
+  if (parts.length < 1 || parts.length > 4 || parts.some((part) => !/^\d+$/.test(part.trim()))) {
+    return { error: "请输入 1—4 个整数，例如 3、3,3、3,3,3 或 3,3,3,3。" };
   }
 
-  const shape = [Number(match[4]), Number(match[5]), Number(match[6])] as Shape;
+  const shape = parts.map((part) => Number(part.trim()));
   if (shape.some((size) => size < 1 || size > 6)) {
     return { error: "每个维度目前支持 1—6，避免一次生成过多单元。" };
   }
-  if (shape[0] * shape[1] * shape[2] > 216) {
+  if (shape.reduce((total, size) => total * size, 1) > 216) {
     return { error: "单元总数不能超过 216。" };
   }
 
-  return {
-    shape,
-    mode: (match[2] ?? match[3]) as DataMode,
-  };
+  return { shape };
+}
+
+function getArrayLayout(shape: Shape): ArrayLayout {
+  const [first = 1, second = 1, third = 1, fourth = 1] = shape;
+
+  if (shape.length === 1) {
+    return { cubeCount: 1, layers: 1, rows: 1, columns: first };
+  }
+  if (shape.length === 2) {
+    return { cubeCount: 1, layers: 1, rows: first, columns: second };
+  }
+  if (shape.length === 3) {
+    return { cubeCount: 1, layers: first, rows: second, columns: third };
+  }
+  return { cubeCount: first, layers: second, rows: third, columns: fourth };
+}
+
+function formatShape(shape: Shape) {
+  return shape.length === 1 ? `(${shape[0]},)` : `(${shape.join(", ")})`;
+}
+
+function getFitZoom(shape: Shape) {
+  const { cubeCount, layers, rows, columns } = getArrayLayout(shape);
+  const gridColumns = shape.length === 4 ? Math.min(cubeCount, 3) : 1;
+  const gridRows = Math.ceil(cubeCount / gridColumns);
+  const width = gridColumns * layers + (gridColumns - 1) * 1.5;
+  const height = gridRows * rows + (gridRows - 1) * 1.5;
+  const projectedSize = Math.max(width + columns * 0.7, height + columns * 0.25);
+  return Math.min(0.95, Math.max(0.58, 7.4 / projectedSize));
 }
 
 function unitRandom(index: number, seed: number, offset: number) {
@@ -38,14 +68,9 @@ function unitRandom(index: number, seed: number, offset: number) {
   return raw - Math.floor(raw);
 }
 
-function createValue(index: number, matrix: MatrixState) {
-  if (matrix.mode === "zeros") return 0;
-  if (matrix.mode === "ones") return 1;
-
-  const first = Math.max(unitRandom(index, matrix.seed, 0.31), 0.0001);
-  if (matrix.mode === "rand") return first;
-
-  const second = unitRandom(index, matrix.seed, 1.79);
+function createValue(index: number, seed: number) {
+  const first = Math.max(unitRandom(index, seed, 0.31), 0.0001);
+  const second = unitRandom(index, seed, 1.79);
   return Math.sqrt(-2 * Math.log(first)) * Math.cos(2 * Math.PI * second);
 }
 
@@ -54,10 +79,9 @@ function formatValue(value: number) {
 }
 
 export default function Home() {
-  const [expression, setExpression] = useState(defaultExpression);
+  const [shapeInput, setShapeInput] = useState(defaultShape);
   const [matrix, setMatrix] = useState<MatrixState>({
     shape: [3, 3, 3],
-    mode: "randn",
     seed: 11,
   });
   const [error, setError] = useState("");
@@ -67,35 +91,86 @@ export default function Home() {
   const [spacing, setSpacing] = useState(64);
   const drag = useRef({ active: false, x: 0, y: 0 });
 
-  const [layers, rows, columns] = matrix.shape;
-  const totalCells = layers * rows * columns;
-  const visibleCells = totalCells - hiddenLayers.size * rows * columns;
+  const dimensionCount = matrix.shape.length;
+  const { cubeCount, layers, rows, columns } = getArrayLayout(matrix.shape);
+  const totalCells = matrix.shape.reduce((total, size) => total * size, 1);
+  const visibleCells = totalCells - hiddenLayers.size * cubeCount * rows * columns;
   const shapeLabel = matrix.shape.join(" × ");
+  const formattedShape = formatShape(matrix.shape);
+  const cubeGridColumns = dimensionCount === 4 ? Math.min(cubeCount, 3) : 1;
+  const cubeGridRows = Math.ceil(cubeCount / cubeGridColumns);
+
+  const sliceHeading = dimensionCount === 1
+    ? "一维数组 / 单行"
+    : dimensionCount === 2
+      ? "二维数组 / 单个平面"
+      : dimensionCount === 3
+        ? "矩阵面 / 第一个维度（左 → 右）"
+        : "所有魔方的矩阵面 / 第二维（左 → 右）";
 
   const cells = useMemo(
     () =>
       Array.from({ length: totalCells }, (_, index) => {
-        const layer = Math.floor(index / (rows * columns));
-        const remainder = index % (rows * columns);
+        const cubeSize = layers * rows * columns;
+        const cube = Math.floor(index / cubeSize);
+        const cubeRemainder = index % cubeSize;
+        const layer = Math.floor(cubeRemainder / (rows * columns));
+        const remainder = cubeRemainder % (rows * columns);
         const row = Math.floor(remainder / columns);
         const column = remainder % columns;
 
+        const cubeGridRow = Math.floor(cube / cubeGridColumns);
+        const cubeGridColumn = cube % cubeGridColumns;
+        const cubesInThisRow = Math.min(
+          cubeGridColumns,
+          cubeCount - cubeGridRow * cubeGridColumns,
+        );
+        const cubeOffsetX = dimensionCount === 4
+          ? (cubeGridColumn - (cubesInThisRow - 1) / 2) * (layers + 1.5)
+          : 0;
+        const cubeOffsetY = dimensionCount === 4
+          ? (cubeGridRow - (cubeGridRows - 1) / 2) * (rows + 1.5)
+          : 0;
+
+        let x = layer - (layers - 1) / 2;
+        let y = row - (rows - 1) / 2;
+        let z = column - (columns - 1) / 2;
+
+        if (dimensionCount === 1) {
+          x = column - (columns - 1) / 2;
+          y = 0;
+          z = 0;
+        } else if (dimensionCount === 2) {
+          x = column - (columns - 1) / 2;
+          z = 0;
+        }
+
         return {
-          key: `${layer}-${row}-${column}`,
+          key: `${cube}-${layer}-${row}-${column}`,
+          cube,
           layer,
-          value: formatValue(createValue(index, matrix)),
-          // The first NumPy dimension runs from the visible left side to the right.
-          x: layer - (layers - 1) / 2,
-          y: row - (rows - 1) / 2,
-          z: column - (columns - 1) / 2,
+          value: formatValue(createValue(index, matrix.seed)),
+          x: x + cubeOffsetX,
+          y: y + cubeOffsetY,
+          z,
         };
       }),
-    [columns, layers, matrix, rows, totalCells],
+    [
+      columns,
+      cubeCount,
+      cubeGridColumns,
+      cubeGridRows,
+      dimensionCount,
+      layers,
+      matrix.seed,
+      rows,
+      totalCells,
+    ],
   );
 
   const generateMatrix = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const parsed = parseNumpyExpression(expression);
+    const parsed = parseShapeInput(shapeInput);
     if ("error" in parsed) {
       setError(parsed.error);
       return;
@@ -103,12 +178,11 @@ export default function Home() {
 
     setMatrix((current) => ({
       shape: parsed.shape,
-      mode: parsed.mode,
       seed: current.seed + 1,
     }));
     setHiddenLayers(new Set());
     setError("");
-    setZoom(Math.max(...parsed.shape) >= 6 ? 0.78 : 0.95);
+    setZoom(getFitZoom(parsed.shape));
   };
 
   const toggleLayer = (layer: number) => {
@@ -146,7 +220,7 @@ export default function Home() {
 
   const resetView = () => {
     setRotation({ x: -24, y: 38 });
-    setZoom(0.95);
+    setZoom(getFitZoom(matrix.shape));
     setSpacing(64);
   };
 
@@ -157,7 +231,7 @@ export default function Home() {
           <span className="brand-mark" aria-hidden="true"><i /><i /><i /></span>
           <span>NumberCube</span>
         </div>
-        <div className="matrix-badge" aria-label={`${shapeLabel} 三维数组`}>
+        <div className="matrix-badge" aria-label={`${shapeLabel} 数组`}>
           <span className="status-dot" />
           {shapeLabel}
         </div>
@@ -165,33 +239,34 @@ export default function Home() {
 
       <section className="workspace">
         <div className="intro">
-          <p className="eyebrow">NUMPY 3D VISUALIZER</p>
+          <p className="eyebrow">NUMPY ARRAY VISUALIZER</p>
           <h1>把数组，<br />变成立方体。</h1>
           <p className="description">
-            输入 NumPy 风格的三维数组表达式，生成对应形状和随机数据，并按切片隐藏不同的矩阵面。
+            输入 1—4 维数组形状，生成一行方块、矩阵面、三维魔方或一组并排的魔方。
           </p>
 
           <form className="numpy-form" onSubmit={generateMatrix}>
-            <label htmlFor="numpy-expression">NumPy 表达式</label>
+            <label htmlFor="shape-input">数组形状</label>
             <div className="expression-row">
               <input
-                id="numpy-expression"
-                value={expression}
-                onChange={(event) => setExpression(event.target.value)}
+                id="shape-input"
+                value={shapeInput}
+                onChange={(event) => setShapeInput(event.target.value)}
+                placeholder="3,3,3"
                 spellCheck="false"
                 autoComplete="off"
-                aria-describedby="expression-status"
+                aria-describedby="shape-status"
               />
               <button type="submit">生成</button>
             </div>
-            <p id="expression-status" className={error ? "form-status is-error" : "form-status"} aria-live="polite">
-              {error || `shape = (${matrix.shape.join(", ")}) · dtype = float64 · ${totalCells} 个单元`}
+            <p id="shape-status" className={error ? "form-status is-error" : "form-status"} aria-live="polite">
+              {error || `shape = ${formattedShape} · dtype = float64 · ${totalCells} 个单元`}
             </p>
           </form>
 
           <div className="slice-panel">
             <div className="panel-heading">
-              <span>矩阵面 / 第一个维度（左 → 右）</span>
+              <span>{sliceHeading}</span>
               {hiddenLayers.size > 0 && (
                 <button type="button" onClick={() => setHiddenLayers(new Set())}>全部显示</button>
               )}
@@ -207,8 +282,16 @@ export default function Home() {
                     onClick={() => toggleLayer(layer)}
                     key={layer}
                   >
-                    <span>第 {layer + 1} 面</span>
-                    <code>a[{layer}, :, :]</code>
+                    <span>{dimensionCount === 1 ? "第 1 行" : `第 ${layer + 1} 面`}</span>
+                    <code>
+                      {dimensionCount === 1
+                        ? "a[:]"
+                        : dimensionCount === 2
+                          ? "a[:, :]"
+                          : dimensionCount === 3
+                            ? `a[${layer}, :, :]`
+                            : `a[:, ${layer}, :, :]`}
+                    </code>
                     <small>{hidden ? "已隐藏" : "显示中"}</small>
                   </button>
                 );
@@ -241,7 +324,9 @@ export default function Home() {
         </div>
 
         <div className="stage-card">
-          <div className="stage-label">ARRAY / SHAPE ({matrix.shape.join(", ")})</div>
+          <div className="stage-label">
+            ARRAY / SHAPE {formattedShape}{dimensionCount === 4 ? ` · ${cubeCount} CUBES` : ""}
+          </div>
           <div
             className="cube-stage"
             onPointerDown={startDrag}
@@ -250,7 +335,7 @@ export default function Home() {
             onPointerCancel={() => { drag.current.active = false; }}
             onWheel={changeZoom}
             role="img"
-            aria-label={`可旋转的 ${shapeLabel} NumPy 三维数组，共 ${totalCells} 个数据单元`}
+            aria-label={`可旋转的 ${shapeLabel} 数字数组，共 ${totalCells} 个数据单元`}
           >
             <div
               className="cube-matrix"
@@ -259,6 +344,7 @@ export default function Home() {
               {cells.map((cell) => (
                 <div
                   className={hiddenLayers.has(cell.layer) ? "number-cell is-layer-hidden" : "number-cell"}
+                  data-cube={cell.cube}
                   data-layer={cell.layer}
                   data-value={cell.value}
                   key={cell.key}
@@ -288,7 +374,7 @@ export default function Home() {
       </section>
 
       <footer>
-        <span>{`a.shape = (${matrix.shape.join(", ")})`}</span>
+        <span>{`a.shape = ${formattedShape}`}</span>
         <span>隐藏面保留透明轮廓</span>
       </footer>
     </main>
