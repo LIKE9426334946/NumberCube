@@ -84,10 +84,10 @@ export default function Home() {
           key: `${layer}-${row}-${column}`,
           layer,
           value: formatValue(createValue(index, matrix)),
-          x: column - (columns - 1) / 2,
+          // The first NumPy dimension runs from the visible left side to the right.
+          x: layer - (layers - 1) / 2,
           y: row - (rows - 1) / 2,
-          // a[0, :, :] starts at the left-rear slice in the default view.
-          z: layer - (layers - 1) / 2,
+          z: column - (columns - 1) / 2,
         };
       }),
     [columns, layers, matrix, rows, totalCells],
@@ -191,7 +191,7 @@ export default function Home() {
 
           <div className="slice-panel">
             <div className="panel-heading">
-              <span>矩阵面 / 第一个维度（左后 → 右前）</span>
+              <span>矩阵面 / 第一个维度（左 → 右）</span>
               {hiddenLayers.size > 0 && (
                 <button type="button" onClick={() => setHiddenLayers(new Set())}>全部显示</button>
               )}
