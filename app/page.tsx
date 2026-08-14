@@ -15,6 +15,7 @@ type ArrayLayout = {
 
 const faces = ["front", "back", "right", "left", "top", "bottom"];
 const defaultShape = "3,3,3";
+const defaultRotation: Rotation = { x: -24, y: -38 };
 
 function parseShapeInput(input: string) {
   const parts = input.trim().replaceAll("，", ",").split(",");
@@ -86,7 +87,7 @@ export default function Home() {
   });
   const [error, setError] = useState("");
   const [hiddenLayers, setHiddenLayers] = useState<Set<number>>(new Set());
-  const [rotation, setRotation] = useState<Rotation>({ x: -24, y: 38 });
+  const [rotation, setRotation] = useState<Rotation>({ ...defaultRotation });
   const [zoom, setZoom] = useState(0.95);
   const [spacing, setSpacing] = useState(64);
   const drag = useRef({ active: false, x: 0, y: 0 });
@@ -219,7 +220,7 @@ export default function Home() {
   };
 
   const resetView = () => {
-    setRotation({ x: -24, y: 38 });
+    setRotation({ ...defaultRotation });
     setZoom(getFitZoom(matrix.shape));
     setSpacing(64);
   };
