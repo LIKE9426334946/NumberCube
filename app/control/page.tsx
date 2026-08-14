@@ -235,6 +235,18 @@ export default function ControlPage() {
               <span aria-hidden="true">↻</span>
               重置视角
             </button>
+            <button
+              type="button"
+              className={state.frontNumbersOnly ? "reset-button face-number-button is-active" : "reset-button face-number-button"}
+              aria-pressed={state.frontNumbersOnly}
+              onClick={() => setState((current) => ({
+                ...current,
+                frontNumbersOnly: !current.frontNumbersOnly,
+              }))}
+            >
+              <span aria-hidden="true">▣</span>
+              {state.frontNumbersOnly ? "显示全部面数字" : "只显示左面数字"}
+            </button>
           </div>
 
           <div className="legend" aria-label="页面说明">

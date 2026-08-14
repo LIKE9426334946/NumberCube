@@ -10,6 +10,7 @@ export type CubeState = {
   values: number[] | null;
   sourceName: string | null;
   hiddenLayers: number[];
+  frontNumbersOnly: boolean;
   rotation: Rotation;
   zoom: number;
   spacing: number;
@@ -37,6 +38,7 @@ export const defaultCubeState: CubeState = {
   values: null,
   sourceName: null,
   hiddenLayers: [],
+  frontNumbersOnly: false,
   rotation: { ...defaultRotation },
   zoom: 0.95,
   spacing: 64,
@@ -188,6 +190,7 @@ function normalizeState(value: unknown): CubeState {
     values,
     sourceName,
     hiddenLayers,
+    frontNumbersOnly: stored.frontNumbersOnly === true,
     rotation,
     zoom: Number.isFinite(stored.zoom)
       ? Math.min(1.3, Math.max(0.58, Number(stored.zoom)))
@@ -406,7 +409,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
         onPointerCancel={() => { drag.current.active = false; }}
         onWheel={changeZoom}
         role="img"
-        aria-label={`可旋转的 ${shapeLabel} 数字数组，共 ${totalCells} 个数据单元`}
+        aria-label={`可旋转的 ${shapeLabel} 数字数组，共 ${totalCells} 个数据单元${state.frontNumbersOnly ? "，当前仅显示初始视角左侧正面的数字" : ""}`}
       >
         <div
           className="cube-matrix"
@@ -426,8 +429,8 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
               }}
             >
               {faces.map((face) => (
-                <div className={`cell-face ${face}`} key={face}>
-                  <span>{cell.value}</span>
+                <div className={`cell-face ${face}`} data-face={face} key={face}>
+                  {(!state.frontNumbersOnly || face === "front") && <span>{cell.value}</span>}
                 </div>
               ))}
             </div>
