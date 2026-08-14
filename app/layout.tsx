@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "NumberCube — 3D 数字矩阵",
-  description: "可旋转观察的 3×3×3 三维数字矩阵。",
+  description: "使用 NumPy 风格表达式生成、旋转并按面观察三维数字矩阵。",
   other: {
     "codex-preview": "development",
   },
