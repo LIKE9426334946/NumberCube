@@ -139,13 +139,69 @@ button, input { font: inherit; }
 }
 
 .display-workspace {
-  width: min(1360px, calc(100% - 48px));
-  margin: auto;
-  padding: 28px 0;
+  width: 100%;
+  height: 100vh;
+  height: 100svh;
+  position: relative;
+  padding: 0;
+}
+
+.display-page {
+  height: 100vh;
+  height: 100svh;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
 }
 
 .display-page .stage-card {
-  min-height: min(760px, calc(100vh - 184px));
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+
+.display-page .stage-card::after {
+  inset: 18px;
+  border-radius: 20px;
+}
+
+.display-floating-header {
+  position: absolute;
+  top: 20px;
+  left: 28px;
+  right: 28px;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  pointer-events: none;
+}
+
+.display-floating-header .brand,
+.display-floating-header .topbar-actions {
+  pointer-events: auto;
+}
+
+.display-floating-header .brand {
+  padding: 8px 12px;
+  border: 1px solid rgba(132, 157, 210, 0.12);
+  border-radius: 12px;
+  background: rgba(7, 12, 23, 0.58);
+  backdrop-filter: blur(12px);
+}
+
+.display-page .stage-label {
+  top: 83px;
+  left: 31px;
+}
+
+.display-page .stage-tools {
+  top: 72px;
+  right: 28px;
 }
 
 .control-workspace {
@@ -1017,17 +1073,16 @@ footer {
   .workspace { grid-template-columns: 1fr; padding: 46px 0 60px; }
   .intro { max-width: 670px; }
   .stage-card { min-height: 640px; }
-  .display-page .stage-card { min-height: calc(100vh - 184px); }
+  .display-page .stage-card { min-height: 100%; }
 }
 
 @media (max-width: 560px) {
   .topbar { height: 66px; }
   .workspace { width: min(100% - 28px, 520px); gap: 36px; padding-top: 36px; }
-  .display-workspace,
   .control-workspace { width: min(100% - 28px, 680px); }
-  .display-workspace { padding: 18px 0; }
+  .display-workspace { width: 100%; padding: 0; }
   .control-workspace { padding: 36px 0 52px; }
-  .display-page .stage-card { min-height: calc(100vh - 156px); }
+  .display-page .stage-card { min-height: 100%; border-radius: 0; }
   .topbar-actions { gap: 6px; }
   .page-link { padding: 0 9px; }
   .matrix-badge { padding: 8px 9px; font-size: 10px; }
@@ -1049,6 +1104,12 @@ footer {
   .stage-card { min-height: 510px; border-radius: 20px; }
   .stage-label { top: 18px; left: 20px; }
   .stage-tools { top: 42px; left: 18px; right: 18px; justify-content: space-between; }
+  .display-floating-header { top: 12px; left: 14px; right: 14px; }
+  .display-floating-header .brand { padding: 7px 9px; font-size: 13px; }
+  .display-floating-header .brand-mark { width: 22px; height: 22px; }
+  .display-page .stage-label { top: 70px; left: 18px; }
+  .display-page .stage-tools { top: 92px; left: 14px; right: 14px; }
+  .display-page .stage-card::after { inset: 8px; border-radius: 14px; }
   .stage-tools .mode-switch { min-width: 0; }
   .stage-tools .mode-switch button { padding: 0 8px; }
   .array-caption { max-width: 120px; }
