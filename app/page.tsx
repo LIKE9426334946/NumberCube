@@ -58,9 +58,9 @@ function getFitZoom(shape: Shape) {
   const { cubeCount, layers, rows, columns } = getArrayLayout(shape);
   const gridColumns = shape.length === 4 ? Math.min(cubeCount, 3) : 1;
   const gridRows = Math.ceil(cubeCount / gridColumns);
-  const width = gridColumns * layers + (gridColumns - 1) * 1.5;
+  const width = gridColumns * columns + (gridColumns - 1) * 1.5;
   const height = gridRows * rows + (gridRows - 1) * 1.5;
-  const projectedSize = Math.max(width + columns * 0.7, height + columns * 0.25);
+  const projectedSize = Math.max(width + layers * 0.7, height + layers * 0.25);
   return Math.min(0.95, Math.max(0.58, 7.4 / projectedSize));
 }
 
@@ -127,15 +127,17 @@ export default function Home() {
           cubeCount - cubeGridRow * cubeGridColumns,
         );
         const cubeOffsetX = dimensionCount === 4
-          ? (cubeGridColumn - (cubesInThisRow - 1) / 2) * (layers + 1.5)
+          ? (cubeGridColumn - (cubesInThisRow - 1) / 2) * (columns + 1.5)
           : 0;
         const cubeOffsetY = dimensionCount === 4
           ? (cubeGridRow - (cubeGridRows - 1) / 2) * (rows + 1.5)
           : 0;
 
-        let x = layer - (layers - 1) / 2;
+        // In the left-facing default view, a[0, :, :] sits at the visible
+        // left-front side and later slices recede toward the right-rear.
+        let x = column - (columns - 1) / 2;
         let y = row - (rows - 1) / 2;
-        let z = column - (columns - 1) / 2;
+        let z = (layers - 1) / 2 - layer;
 
         if (dimensionCount === 1) {
           x = column - (columns - 1) / 2;
