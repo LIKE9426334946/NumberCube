@@ -11,6 +11,7 @@ import {
   getFitZoom,
   parseJsonArrayData,
   parseShapeInput,
+  parseSliceExpression,
   ShapeBadge,
   useCubeState,
 } from "../cube";
@@ -20,6 +21,8 @@ export default function ControlPage() {
   const [shapeInput, setShapeInput] = useState(state.shape.join(","));
   const [error, setError] = useState("");
   const [jsonStatus, setJsonStatus] = useState("");
+  const [sliceInput, setSliceInput] = useState(state.sliceExpression);
+  const [sliceError, setSliceError] = useState("");
   const dimensionCount = state.shape.length;
   const { layers } = getArrayLayout(state.shape);
   const totalCells = state.shape.reduce((total, size) => total * size, 1);
@@ -28,6 +31,10 @@ export default function ControlPage() {
   useEffect(() => {
     queueMicrotask(() => setShapeInput(state.shape.join(",")));
   }, [state.shape]);
+
+  useEffect(() => {
+    queueMicrotask(() => setSliceInput(state.sliceExpression));
+  }, [state.sliceExpression]);
 
   const sliceHeading = dimensionCount === 1
     ? "一维数组 / 单行"
@@ -52,10 +59,13 @@ export default function ControlPage() {
       values: null,
       sourceName: null,
       hiddenLayers: [],
+      sliceExpression: "",
+      highlightedIndices: [],
       zoom: getFitZoom(parsed.shape),
     }));
     setError("");
     setJsonStatus("");
+    setSliceError("");
   };
 
   const importJson = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -85,16 +95,46 @@ export default function ControlPage() {
         values: parsed.values,
         sourceName: file.name,
         hiddenLayers: [],
+        sliceExpression: "",
+        highlightedIndices: [],
         zoom: getFitZoom(parsed.shape),
       }));
       setShapeInput(parsed.shape.join(","));
       setError("");
+      setSliceError("");
       setJsonStatus(`已读取 ${file.name} · shape = ${formatShape(parsed.shape)} · ${parsed.values.length} 个数据`);
     } catch {
       setJsonStatus("无法解析该文件，请确认它是有效的 JSON。");
     } finally {
       event.target.value = "";
     }
+  };
+
+  const applySlice = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const parsed = parseSliceExpression(sliceInput, state.shape);
+    if ("error" in parsed) {
+      setSliceError(parsed.error);
+      return;
+    }
+
+    setState((current) => ({
+      ...current,
+      sliceExpression: parsed.expression,
+      highlightedIndices: parsed.indices,
+    }));
+    setSliceInput(parsed.expression);
+    setSliceError("");
+  };
+
+  const clearSlice = () => {
+    setState((current) => ({
+      ...current,
+      sliceExpression: "",
+      highlightedIndices: [],
+    }));
+    setSliceInput("");
+    setSliceError("");
   };
 
   const toggleLayer = (layer: number) => {
@@ -174,6 +214,42 @@ export default function ControlPage() {
                 {jsonStatus || `当前数据：${state.sourceName}`}
               </p>
             )}
+          </section>
+
+          <section className="selection-panel" aria-labelledby="selection-title">
+            <div className="selection-heading">
+              <div>
+                <p id="selection-title">数组切片</p>
+                <span>支持整数、start:stop 和 start:stop:step，省略的维度按 : 处理。</span>
+              </div>
+              {state.highlightedIndices.length > 0 && (
+                <button type="button" onClick={clearSlice}>清除高亮</button>
+              )}
+            </div>
+            <form className="selection-form" onSubmit={applySlice}>
+              <label htmlFor="slice-input">切片表达式</label>
+              <div className="selection-row">
+                <input
+                  id="slice-input"
+                  value={sliceInput}
+                  onChange={(event) => setSliceInput(event.target.value)}
+                  placeholder={state.shape.map(() => "0:2").join(",")}
+                  spellCheck="false"
+                  autoComplete="off"
+                  aria-describedby="slice-status"
+                />
+                <button type="submit">高亮</button>
+              </div>
+              <p
+                id="slice-status"
+                className={sliceError ? "selection-status is-error" : "selection-status"}
+                aria-live="polite"
+              >
+                {sliceError || (state.highlightedIndices.length > 0
+                  ? `${state.sliceExpression} · 已选中 ${state.highlightedIndices.length} / ${totalCells} 个数据单元`
+                  : "例如 data[0:2,0:2,0:2]")}
+              </p>
+            </form>
           </section>
 
           <div className="slice-panel">

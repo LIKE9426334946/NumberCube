@@ -10,6 +10,8 @@ export type CubeState = {
   values: number[] | null;
   sourceName: string | null;
   hiddenLayers: number[];
+  sliceExpression: string;
+  highlightedIndices: number[];
   frontNumbersOnly: boolean;
   rotation: Rotation;
   zoom: number;
@@ -38,6 +40,8 @@ export const defaultCubeState: CubeState = {
   values: null,
   sourceName: null,
   hiddenLayers: [],
+  sliceExpression: "",
+  highlightedIndices: [],
   frontNumbersOnly: false,
   rotation: { ...defaultRotation },
   zoom: 0.95,
@@ -60,6 +64,89 @@ export function parseShapeInput(input: string) {
   }
 
   return { shape };
+}
+
+type ParsedSlice = { expression: string; indices: number[] };
+
+export function parseSliceExpression(input: string, shape: number[]): ParsedSlice | { error: string } {
+  const original = input.trim().replaceAll("，", ",");
+  if (!original) return { error: "请输入切片，例如 0:2,0:2,0:2。" };
+
+  let arrayName = "a";
+  let body = original;
+  const bracketStart = original.indexOf("[");
+  if (bracketStart >= 0) {
+    const prefix = original.slice(0, bracketStart).trim();
+    if (!/^[A-Za-z_]\w*$/.test(prefix) || !original.endsWith("]")) {
+      return { error: "切片格式不正确，请输入 data[0:2,0:2] 或 0:2,0:2。" };
+    }
+    arrayName = prefix;
+    body = original.slice(bracketStart + 1, -1).trim();
+  }
+  if (!body || body.includes("[") || body.includes("]")) {
+    return { error: "切片格式不正确，请输入 data[0:2,0:2] 或 0:2,0:2。" };
+  }
+
+  const tokens = body.split(",").map((token) => token.trim());
+  if (tokens.some((token) => !token)) {
+    return { error: "每个维度都需要填写切片，未限制的维度请使用 :。" };
+  }
+  if (tokens.length > shape.length) {
+    return { error: `当前是 ${shape.length} 维数组，切片不能超过 ${shape.length} 个维度。` };
+  }
+  while (tokens.length < shape.length) tokens.push(":");
+
+  const selections: number[][] = [];
+  for (let dimension = 0; dimension < shape.length; dimension += 1) {
+    const token = tokens[dimension];
+    const size = shape[dimension];
+
+    if (!token.includes(":")) {
+      if (!/^-?\d+$/.test(token)) {
+        return { error: `第 ${dimension + 1} 维格式不正确。` };
+      }
+      const rawIndex = Number(token);
+      const index = rawIndex < 0 ? size + rawIndex : rawIndex;
+      if (index < 0 || index >= size) {
+        return { error: `第 ${dimension + 1} 维索引超出范围。` };
+      }
+      selections.push([index]);
+      continue;
+    }
+
+    const parts = token.split(":");
+    if (parts.length < 2 || parts.length > 3 || parts.some((part) => part && !/^-?\d+$/.test(part))) {
+      return { error: `第 ${dimension + 1} 维切片格式不正确。` };
+    }
+    const step = parts[2] ? Number(parts[2]) : 1;
+    if (step <= 0) {
+      return { error: "目前切片步长需要是正整数。" };
+    }
+
+    const normalizeBound = (part: string, fallback: number) => {
+      if (!part) return fallback;
+      const value = Number(part);
+      return Math.min(size, Math.max(0, value < 0 ? size + value : value));
+    };
+    const start = normalizeBound(parts[0], 0);
+    const stop = normalizeBound(parts[1], size);
+    const indices: number[] = [];
+    for (let index = start; index < stop; index += step) indices.push(index);
+    selections.push(indices);
+  }
+
+  let indices = [0];
+  selections.forEach((selection, dimension) => {
+    indices = indices.flatMap((base) => selection.map((index) => base * shape[dimension] + index));
+  });
+  if (indices.length === 0) {
+    return { error: "这个切片没有选中任何数据单元。" };
+  }
+
+  return {
+    expression: `${arrayName}[${tokens.join(", ")}]`,
+    indices,
+  };
 }
 
 type ParsedJsonArray = { shape: number[]; values: number[] };
@@ -183,6 +270,14 @@ function normalizeState(value: unknown): CubeState {
   const sourceName = values && typeof stored.sourceName === "string"
     ? stored.sourceName.slice(0, 120)
     : null;
+  const highlightedIndices = Array.isArray(stored.highlightedIndices)
+    ? Array.from(new Set(stored.highlightedIndices.filter(
+      (index) => Number.isInteger(index) && index >= 0 && index < totalCells,
+    )))
+    : [];
+  const sliceExpression = highlightedIndices.length > 0 && typeof stored.sliceExpression === "string"
+    ? stored.sliceExpression.slice(0, 160)
+    : "";
 
   return {
     shape,
@@ -190,6 +285,8 @@ function normalizeState(value: unknown): CubeState {
     values,
     sourceName,
     hiddenLayers,
+    sliceExpression,
+    highlightedIndices,
     frontNumbersOnly: stored.frontNumbersOnly === true,
     rotation,
     zoom: Number.isFinite(stored.zoom)
@@ -308,6 +405,10 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
   const cubeGridColumns = dimensionCount === 4 ? Math.min(cubeCount, 3) : 1;
   const cubeGridRows = Math.ceil(cubeCount / cubeGridColumns);
   const hiddenLayers = useMemo(() => new Set(state.hiddenLayers), [state.hiddenLayers]);
+  const highlightedIndices = useMemo(
+    () => new Set(state.highlightedIndices),
+    [state.highlightedIndices],
+  );
 
   const cells = useMemo(
     () => Array.from({ length: totalCells }, (_, index) => {
@@ -344,6 +445,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
 
       return {
         key: `${cube}-${layer}-${row}-${column}`,
+        index,
         cube,
         layer,
         value: state.values
@@ -400,6 +502,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
       <div className="stage-label">
         ARRAY / SHAPE {formattedShape}{dimensionCount === 4 ? ` · ${cubeCount} CUBES` : ""}
         {state.values ? " · JSON" : ""}
+        {highlightedIndices.size > 0 ? ` · ${highlightedIndices.size} SELECTED` : ""}
       </div>
       <div
         className="cube-stage"
@@ -409,7 +512,7 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
         onPointerCancel={() => { drag.current.active = false; }}
         onWheel={changeZoom}
         role="img"
-        aria-label={`可旋转的 ${shapeLabel} 数字数组，共 ${totalCells} 个数据单元${state.frontNumbersOnly ? "，当前仅显示初始视角左侧正面的数字" : ""}`}
+        aria-label={`可旋转的 ${shapeLabel} 数字数组，共 ${totalCells} 个数据单元${highlightedIndices.size > 0 ? `，已高亮 ${highlightedIndices.size} 个` : ""}${state.frontNumbersOnly ? "，当前仅显示初始视角左侧正面的数字" : ""}`}
       >
         <div
           className="cube-matrix"
@@ -419,9 +522,15 @@ export function CubeStage({ state, setState }: { state: CubeState; setState: Cub
         >
           {cells.map((cell) => (
             <div
-              className={hiddenLayers.has(cell.layer) ? "number-cell is-layer-hidden" : "number-cell"}
+              className={[
+                "number-cell",
+                hiddenLayers.has(cell.layer) ? "is-layer-hidden" : "",
+                highlightedIndices.has(cell.index) ? "is-slice-selected" : "",
+              ].filter(Boolean).join(" ")}
+              data-index={cell.index}
               data-cube={cell.cube}
               data-layer={cell.layer}
+              data-selected={highlightedIndices.has(cell.index) ? "true" : "false"}
               data-value={cell.value}
               key={cell.key}
               style={{
