@@ -21,10 +21,26 @@ hosting="${SITES_PROJECT_ROOT}/dist/.openai/hosting.json"
 
 node --input-type=module - "${worker}" "${hosting}" <<'NODE'
 import { readFile } from "node:fs/promises";
+import { register } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const [workerPath, hostingPath] = process.argv.slice(2);
 JSON.parse(await readFile(hostingPath, "utf8"));
+
+// Cloudflare bindings are native inside workerd, but unavailable to Node.js
+// while this script only verifies the generated module's export shape.
+const cloudflareLoader = `
+  export async function resolve(specifier, context, nextResolve) {
+    if (specifier === "cloudflare:workers") {
+      return {
+        url: "data:text/javascript,export const env = {}",
+        shortCircuit: true,
+      };
+    }
+    return nextResolve(specifier, context);
+  }
+`;
+register(`data:text/javascript,${encodeURIComponent(cloudflareLoader)}`, import.meta.url);
 
 const workerUrl = pathToFileURL(workerPath);
 workerUrl.searchParams.set("sites-validation", `${process.pid}-${Date.now()}`);

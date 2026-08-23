@@ -1,4 +1,11 @@
-// Intentionally empty by default.
-// Add Drizzle tables here when the site actually needs a database.
-// See examples/d1/db/schema.ts for an opt-in example.
-export {};
+import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
+export const savedScenes = sqliteTable("saved_scenes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  snapshot: text("snapshot").notNull(),
+  arrayCount: integer("array_count").notNull(),
+  cellCount: integer("cell_count").notNull(),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+});

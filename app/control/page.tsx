@@ -13,6 +13,7 @@ import {
   getArrayLayout,
   getFitZoom,
   InteractionModeSwitch,
+  normalizeCubeState,
   parseJsonArrayData,
   parseShapeInput,
   parseSliceExpression,
@@ -20,6 +21,16 @@ import {
   useCubeState,
 } from "../cube";
 import type { ArrayItem } from "../cube";
+
+type SavedScene = {
+  id: string;
+  name: string;
+  snapshot: string;
+  arrayCount: number;
+  cellCount: number;
+  createdAt: number;
+  updatedAt: number;
+};
 
 const maxArrays = 8;
 
@@ -31,6 +42,14 @@ export default function ControlPage() {
   const [jsonStatus, setJsonStatus] = useState("");
   const [sliceInput, setSliceInput] = useState(activeArray.sliceExpression);
   const [sliceError, setSliceError] = useState("");
+  const [savedScenes, setSavedScenes] = useState<SavedScene[]>([]);
+  const [sceneName, setSceneName] = useState("");
+  const [sceneStatus, setSceneStatus] = useState("");
+  const [sceneStatusIsError, setSceneStatusIsError] = useState(false);
+  const [scenesLoading, setScenesLoading] = useState(true);
+  const [sceneBusyId, setSceneBusyId] = useState<string | null>(null);
+  const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
+  const [editingSceneName, setEditingSceneName] = useState("");
   const dimensionCount = activeArray.shape.length;
   const { layers } = getArrayLayout(activeArray.shape);
   const totalCells = activeArray.shape.reduce((total, size) => total * size, 1);
@@ -49,6 +68,27 @@ export default function ControlPage() {
       setSliceError("");
     });
   }, [activeArray.id, activeArray.sliceExpression]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadSavedScenes = async () => {
+      try {
+        const response = await fetch("/api/scenes", { cache: "no-store" });
+        const payload = await response.json() as { scenes?: SavedScene[]; error?: string };
+        if (!response.ok) throw new Error(payload.error || "读取失败");
+        if (!cancelled) setSavedScenes(payload.scenes ?? []);
+      } catch (loadError) {
+        if (!cancelled) {
+          setSceneStatus(loadError instanceof Error ? loadError.message : "暂时无法读取保存的场景。");
+          setSceneStatusIsError(true);
+        }
+      } finally {
+        if (!cancelled) setScenesLoading(false);
+      }
+    };
+    void loadSavedScenes();
+    return () => { cancelled = true; };
+  }, []);
 
   const updateActiveArray = (updater: (item: ArrayItem) => ArrayItem) => {
     setState((current) => ({
@@ -211,6 +251,107 @@ export default function ControlPage() {
     }));
   };
 
+  const saveScene = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = sceneName.trim();
+    if (!name) {
+      setSceneStatus("请先填写场景名称。");
+      setSceneStatusIsError(true);
+      return;
+    }
+
+    setSceneBusyId("new");
+    setSceneStatus("");
+    try {
+      const response = await fetch("/api/scenes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, snapshot: state }),
+      });
+      const payload = await response.json() as { scene?: SavedScene; error?: string };
+      if (!response.ok || !payload.scene) throw new Error(payload.error || "保存场景失败。");
+      setSavedScenes((current) => [payload.scene!, ...current]);
+      setSceneName("");
+      setSceneStatus(`“${payload.scene.name}”已保存，以后可以从目录中恢复。`);
+      setSceneStatusIsError(false);
+    } catch (saveError) {
+      setSceneStatus(saveError instanceof Error ? saveError.message : "保存场景失败，请稍后重试。");
+      setSceneStatusIsError(true);
+    } finally {
+      setSceneBusyId(null);
+    }
+  };
+
+  const restoreScene = (scene: SavedScene) => {
+    try {
+      const restored = normalizeCubeState(JSON.parse(scene.snapshot));
+      setState(restored);
+      setSceneStatus(`已恢复“${scene.name}”：${scene.arrayCount} 个数组，${scene.cellCount} 个数据单元。`);
+      setSceneStatusIsError(false);
+    } catch {
+      setSceneStatus("这个场景的数据已损坏，无法恢复。");
+      setSceneStatusIsError(true);
+    }
+  };
+
+  const beginRenameScene = (scene: SavedScene) => {
+    setEditingSceneId(scene.id);
+    setEditingSceneName(scene.name);
+    setSceneStatus("");
+  };
+
+  const renameScene = async (event: FormEvent<HTMLFormElement>, id: string) => {
+    event.preventDefault();
+    const name = editingSceneName.trim();
+    if (!name) {
+      setSceneStatus("场景名称不能为空。");
+      setSceneStatusIsError(true);
+      return;
+    }
+
+    setSceneBusyId(id);
+    try {
+      const response = await fetch("/api/scenes", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, name }),
+      });
+      const payload = await response.json() as { updatedAt?: number; error?: string };
+      if (!response.ok) throw new Error(payload.error || "重命名失败。");
+      setSavedScenes((current) => current.map((scene) => scene.id === id
+        ? { ...scene, name, updatedAt: payload.updatedAt ?? Date.now() }
+        : scene));
+      setEditingSceneId(null);
+      setEditingSceneName("");
+      setSceneStatus(`场景已重命名为“${name}”。`);
+      setSceneStatusIsError(false);
+    } catch (renameError) {
+      setSceneStatus(renameError instanceof Error ? renameError.message : "重命名失败，请稍后重试。");
+      setSceneStatusIsError(true);
+    } finally {
+      setSceneBusyId(null);
+    }
+  };
+
+  const removeSavedScene = async (scene: SavedScene) => {
+    if (!window.confirm(`确定删除保存的场景“${scene.name}”吗？`)) return;
+    setSceneBusyId(scene.id);
+    try {
+      const response = await fetch(`/api/scenes?id=${encodeURIComponent(scene.id)}`, { method: "DELETE" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "删除失败。");
+      setSavedScenes((current) => current.filter((item) => item.id !== scene.id));
+      if (editingSceneId === scene.id) setEditingSceneId(null);
+      setSceneStatus(`已删除“${scene.name}”。`);
+      setSceneStatusIsError(false);
+    } catch (deleteError) {
+      setSceneStatus(deleteError instanceof Error ? deleteError.message : "删除失败，请稍后重试。");
+      setSceneStatusIsError(true);
+    } finally {
+      setSceneBusyId(null);
+    }
+  };
+
   return (
     <main className="page-shell control-page">
       <header className="topbar">
@@ -228,6 +369,87 @@ export default function ControlPage() {
           <p className="description">
             可同时导入多个 JSON 数组，分别调整数据、切片和位置，并在展示页切换旋转或移动模式。
           </p>
+
+          <section className="saved-scenes-panel" aria-labelledby="saved-scenes-title">
+            <div className="saved-scenes-heading">
+              <div>
+                <p id="saved-scenes-title">保存的场景</p>
+                <span>保存当前全部数组、位置、视角、切片和隐藏状态，点击场景即可恢复。</span>
+              </div>
+              <strong>{savedScenes.length} 个场景</strong>
+            </div>
+
+            <form className="scene-save-form" onSubmit={saveScene}>
+              <label htmlFor="scene-name">场景名称</label>
+              <div>
+                <input
+                  id="scene-name"
+                  value={sceneName}
+                  maxLength={60}
+                  onChange={(event) => setSceneName(event.target.value)}
+                  placeholder="例如：卷积层输入与权重"
+                  autoComplete="off"
+                />
+                <button type="submit" disabled={sceneBusyId === "new"}>
+                  {sceneBusyId === "new" ? "保存中…" : "保存当前场景"}
+                </button>
+              </div>
+            </form>
+
+            <div className="saved-scenes-list" aria-live="polite">
+              {scenesLoading && <p className="saved-scenes-empty">正在读取场景目录…</p>}
+              {!scenesLoading && savedScenes.length === 0 && (
+                <p className="saved-scenes-empty">还没有保存的场景，给当前魔方取个名字吧。</p>
+              )}
+              {savedScenes.map((scene) => (
+                <article className="saved-scene-item" key={scene.id}>
+                  {editingSceneId === scene.id ? (
+                    <form className="scene-rename-form" onSubmit={(event) => renameScene(event, scene.id)}>
+                      <input
+                        value={editingSceneName}
+                        maxLength={60}
+                        onChange={(event) => setEditingSceneName(event.target.value)}
+                        aria-label="新的场景名称"
+                        autoFocus
+                      />
+                      <button type="submit" disabled={sceneBusyId === scene.id}>确定</button>
+                      <button type="button" onClick={() => setEditingSceneId(null)}>取消</button>
+                    </form>
+                  ) : (
+                    <>
+                      <button type="button" className="scene-restore-button" onClick={() => restoreScene(scene)}>
+                        <span className="scene-folder-icon" aria-hidden="true">▱</span>
+                        <span>
+                          <strong>{scene.name}</strong>
+                          <small>{scene.arrayCount} 个数组 · {scene.cellCount} 个单元</small>
+                        </span>
+                        <time dateTime={new Date(scene.updatedAt).toISOString()}>
+                          {new Date(scene.updatedAt).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
+                        </time>
+                      </button>
+                      <div className="scene-item-actions">
+                        <button type="button" onClick={() => beginRenameScene(scene)}>重命名</button>
+                        <button
+                          type="button"
+                          className="is-danger"
+                          disabled={sceneBusyId === scene.id}
+                          onClick={() => void removeSavedScene(scene)}
+                        >
+                          删除
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </article>
+              ))}
+            </div>
+
+            {sceneStatus && (
+              <p className={sceneStatusIsError ? "scene-status is-error" : "scene-status"} role="status">
+                {sceneStatus}
+              </p>
+            )}
+          </section>
 
           <section className="array-list-panel" aria-labelledby="array-list-title">
             <div className="array-list-heading">

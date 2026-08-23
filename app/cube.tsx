@@ -314,7 +314,7 @@ function normalizeArrayItem(value: unknown, index: number, usedIds: Set<string>)
   };
 }
 
-function normalizeState(value: unknown): CubeState {
+export function normalizeCubeState(value: unknown): CubeState {
   if (!value || typeof value !== "object") return defaultCubeState;
   const stored = value as Partial<CubeState> & Partial<ArrayItem>;
   const usedIds = new Set<string>();
@@ -369,7 +369,7 @@ function normalizeState(value: unknown): CubeState {
 function readStoredState() {
   try {
     const stored = window.localStorage.getItem(storageKey);
-    return stored ? normalizeState(JSON.parse(stored)) : defaultCubeState;
+    return stored ? normalizeCubeState(JSON.parse(stored)) : defaultCubeState;
   } catch {
     return defaultCubeState;
   }
@@ -383,13 +383,13 @@ export function useCubeState(): [CubeState, CubeStateSetter] {
     queueMicrotask(() => setState(readStoredState()));
     const handleStorage = (event: StorageEvent) => {
       if (event.key !== storageKey || !event.newValue) return;
-      try { setState(normalizeState(JSON.parse(event.newValue))); } catch { /* Ignore malformed data. */ }
+      try { setState(normalizeCubeState(JSON.parse(event.newValue))); } catch { /* Ignore malformed data. */ }
     };
 
     window.addEventListener("storage", handleStorage);
     if ("BroadcastChannel" in window) {
       channel.current = new BroadcastChannel(channelName);
-      channel.current.onmessage = (event) => setState(normalizeState(event.data));
+      channel.current.onmessage = (event) => setState(normalizeCubeState(event.data));
     }
 
     return () => {
@@ -401,7 +401,7 @@ export function useCubeState(): [CubeState, CubeStateSetter] {
 
   const updateState = useCallback<CubeStateSetter>((update) => {
     setState((current) => {
-      const next = normalizeState(typeof update === "function" ? update(current) : update);
+      const next = normalizeCubeState(typeof update === "function" ? update(current) : update);
       try {
         window.localStorage.setItem(storageKey, JSON.stringify(next));
         channel.current?.postMessage(next);
