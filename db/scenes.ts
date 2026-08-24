@@ -175,6 +175,34 @@ export async function renameSavedScene(id: string, name: string, updatedAt: numb
   });
 }
 
+export async function updateSavedScene(
+  id: string,
+  snapshot: string,
+  arrayCount: number,
+  cellCount: number,
+  updatedAt: number,
+) {
+  const database = await getOptionalScenesDatabase();
+  if (database) {
+    const result = await database.prepare(`
+      UPDATE saved_scenes
+      SET snapshot = ?, array_count = ?, cell_count = ?, updated_at = ?
+      WHERE id = ?
+    `).bind(snapshot, arrayCount, cellCount, updatedAt, id).run();
+    return (result.meta.changes ?? 0) > 0;
+  }
+
+  return updateScenesFile((scenes) => {
+    const exists = scenes.some((scene) => scene.id === id);
+    return {
+      scenes: scenes.map((scene) => scene.id === id
+        ? { ...scene, snapshot, arrayCount, cellCount, updatedAt }
+        : scene),
+      result: exists,
+    };
+  });
+}
+
 export async function deleteSavedScene(id: string) {
   const database = await getOptionalScenesDatabase();
   if (database) {

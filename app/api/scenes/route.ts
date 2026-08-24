@@ -4,6 +4,7 @@ import {
   deleteSavedScene,
   listSavedScenes,
   renameSavedScene,
+  updateSavedScene,
 } from "../../../db/scenes";
 
 const maxSnapshotBytes = 300_000;
@@ -87,6 +88,44 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ id: body.id, name, updatedAt });
   } catch {
     return NextResponse.json({ error: "重命名失败，请稍后重试。" }, { status: 500 });
+  }
+}
+
+export async function PUT(request: Request) {
+  try {
+    const body = await request.json() as { id?: unknown; snapshot?: unknown };
+    const summary = getSnapshotSummary(body.snapshot);
+    if (!validId(body.id)) {
+      return NextResponse.json({ error: "场景编号无效。" }, { status: 400 });
+    }
+    if (!summary) {
+      return NextResponse.json({ error: "当前场景数据不完整，无法更新。" }, { status: 400 });
+    }
+
+    const snapshot = JSON.stringify(body.snapshot);
+    if (new TextEncoder().encode(snapshot).byteLength > maxSnapshotBytes) {
+      return NextResponse.json({ error: "当前场景数据过大，无法更新。" }, { status: 413 });
+    }
+
+    const updatedAt = Date.now();
+    const updated = await updateSavedScene(
+      body.id,
+      snapshot,
+      summary.arrayCount,
+      summary.cellCount,
+      updatedAt,
+    );
+    if (!updated) return NextResponse.json({ error: "没有找到这个场景。" }, { status: 404 });
+    return NextResponse.json({
+      scene: {
+        id: body.id,
+        snapshot,
+        ...summary,
+        updatedAt,
+      },
+    });
+  } catch {
+    return NextResponse.json({ error: "更新场景失败，请稍后重试。" }, { status: 500 });
   }
 }
 

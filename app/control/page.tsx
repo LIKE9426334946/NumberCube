@@ -48,6 +48,7 @@ export default function ControlPage() {
   const [sceneStatusIsError, setSceneStatusIsError] = useState(false);
   const [scenesLoading, setScenesLoading] = useState(true);
   const [sceneBusyId, setSceneBusyId] = useState<string | null>(null);
+  const [openedSceneId, setOpenedSceneId] = useState<string | null>(null);
   const [editingSceneId, setEditingSceneId] = useState<string | null>(null);
   const [editingSceneName, setEditingSceneName] = useState("");
   const dimensionCount = activeArray.shape.length;
@@ -271,6 +272,7 @@ export default function ControlPage() {
       const payload = await response.json() as { scene?: SavedScene; error?: string };
       if (!response.ok || !payload.scene) throw new Error(payload.error || "保存场景失败。");
       setSavedScenes((current) => [payload.scene!, ...current]);
+      setOpenedSceneId(payload.scene.id);
       setSceneName("");
       setSceneStatus(`“${payload.scene.name}”已保存，以后可以从目录中恢复。`);
       setSceneStatusIsError(false);
@@ -286,6 +288,7 @@ export default function ControlPage() {
     try {
       const restored = normalizeCubeState(JSON.parse(scene.snapshot));
       setState(restored);
+      setOpenedSceneId(scene.id);
       setSceneStatus(`已恢复“${scene.name}”：${scene.arrayCount} 个数组，${scene.cellCount} 个数据单元。`);
       setSceneStatusIsError(false);
     } catch {
@@ -298,6 +301,40 @@ export default function ControlPage() {
     setEditingSceneId(scene.id);
     setEditingSceneName(scene.name);
     setSceneStatus("");
+  };
+
+  const updateScene = async (scene: SavedScene) => {
+    if (openedSceneId !== scene.id) return;
+    if (!window.confirm(`确定用当前魔方状态更新“${scene.name}”吗？`)) return;
+
+    setSceneBusyId(scene.id);
+    setSceneStatus("");
+    try {
+      const response = await fetch("/api/scenes", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: scene.id, snapshot: state }),
+      });
+      const payload = await response.json() as {
+        scene?: Pick<SavedScene, "id" | "snapshot" | "arrayCount" | "cellCount" | "updatedAt">;
+        error?: string;
+      };
+      if (!response.ok || !payload.scene) throw new Error(payload.error || "更新场景失败。");
+
+      setSavedScenes((current) => {
+        const updated = current.find((item) => item.id === scene.id);
+        if (!updated) return current;
+        const merged = { ...updated, ...payload.scene };
+        return [merged, ...current.filter((item) => item.id !== scene.id)];
+      });
+      setSceneStatus(`“${scene.name}”已更新为当前魔方状态。`);
+      setSceneStatusIsError(false);
+    } catch (updateError) {
+      setSceneStatus(updateError instanceof Error ? updateError.message : "更新场景失败，请稍后重试。");
+      setSceneStatusIsError(true);
+    } finally {
+      setSceneBusyId(null);
+    }
   };
 
   const renameScene = async (event: FormEvent<HTMLFormElement>, id: string) => {
@@ -342,6 +379,7 @@ export default function ControlPage() {
       if (!response.ok) throw new Error(payload.error || "删除失败。");
       setSavedScenes((current) => current.filter((item) => item.id !== scene.id));
       if (editingSceneId === scene.id) setEditingSceneId(null);
+      if (openedSceneId === scene.id) setOpenedSceneId(null);
       setSceneStatus(`已删除“${scene.name}”。`);
       setSceneStatusIsError(false);
     } catch (deleteError) {
@@ -402,7 +440,10 @@ export default function ControlPage() {
                 <p className="saved-scenes-empty">还没有保存的场景，给当前魔方取个名字吧。</p>
               )}
               {savedScenes.map((scene) => (
-                <article className="saved-scene-item" key={scene.id}>
+                <article
+                  className={`saved-scene-item${openedSceneId === scene.id ? " is-open" : ""}`}
+                  key={scene.id}
+                >
                   {editingSceneId === scene.id ? (
                     <form className="scene-rename-form" onSubmit={(event) => renameScene(event, scene.id)}>
                       <input
@@ -417,17 +458,34 @@ export default function ControlPage() {
                     </form>
                   ) : (
                     <>
-                      <button type="button" className="scene-restore-button" onClick={() => restoreScene(scene)}>
+                      <button
+                        type="button"
+                        className="scene-restore-button"
+                        aria-pressed={openedSceneId === scene.id}
+                        onClick={() => restoreScene(scene)}
+                      >
                         <span className="scene-folder-icon" aria-hidden="true">▱</span>
                         <span>
                           <strong>{scene.name}</strong>
                           <small>{scene.arrayCount} 个数组 · {scene.cellCount} 个单元</small>
                         </span>
-                        <time dateTime={new Date(scene.updatedAt).toISOString()}>
-                          {new Date(scene.updatedAt).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
-                        </time>
+                        <span className="scene-item-state">
+                          {openedSceneId === scene.id && <b>已打开</b>}
+                          <time dateTime={new Date(scene.updatedAt).toISOString()}>
+                            {new Date(scene.updatedAt).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" })}
+                          </time>
+                        </span>
                       </button>
                       <div className="scene-item-actions">
+                        <button
+                          type="button"
+                          className="scene-update-action"
+                          disabled={openedSceneId !== scene.id || sceneBusyId === scene.id}
+                          title={openedSceneId === scene.id ? "用当前魔方状态覆盖此场景" : "请先打开这个场景"}
+                          onClick={() => void updateScene(scene)}
+                        >
+                          更新
+                        </button>
                         <button type="button" onClick={() => beginRenameScene(scene)}>重命名</button>
                         <button
                           type="button"
