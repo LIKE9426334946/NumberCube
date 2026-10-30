@@ -15,9 +15,6 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "NumberCube — 数字数组可视化",
   description: "输入 1—4 维数组形状，生成、旋转并按面观察数字矩阵与魔方。",
-  other: {
-    "codex-preview": "development",
-  },
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

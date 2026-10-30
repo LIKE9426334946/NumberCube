@@ -6,6 +6,7 @@ import type { CSSProperties, PointerEvent, WheelEvent } from "react";
 export type Rotation = { x: number; y: number };
 export type Position = { x: number; y: number };
 export type InteractionMode = "rotate" | "move";
+export type CellLabelMode = "value" | "index";
 
 export type ArrayItem = {
   id: string;
@@ -23,6 +24,7 @@ export type CubeState = {
   arrays: ArrayItem[];
   activeArrayId: string;
   interactionMode: InteractionMode;
+  cellLabelMode: CellLabelMode;
   frontNumbersOnly: boolean;
   rotation: Rotation;
   zoom: number;
@@ -76,6 +78,7 @@ export const defaultCubeState: CubeState = {
   arrays: [defaultArray],
   activeArrayId: defaultArrayId,
   interactionMode: "rotate",
+  cellLabelMode: "value",
   frontNumbersOnly: false,
   rotation: { ...defaultRotation },
   zoom: 0.95,
@@ -245,6 +248,16 @@ export function formatShape(shape: number[]) {
   return shape.length === 1 ? `(${shape[0]},)` : `(${shape.join(", ")})`;
 }
 
+export function formatIndexLabel(index: number, shape: number[]) {
+  const coordinates = new Array<number>(shape.length);
+  let remainder = index;
+  for (let dimension = shape.length - 1; dimension >= 0; dimension -= 1) {
+    coordinates[dimension] = remainder % shape[dimension];
+    remainder = Math.floor(remainder / shape[dimension]);
+  }
+  return `x${coordinates.join("")}`;
+}
+
 export function getFitZoom(shape: number[]) {
   const { cubeCount, layers, rows, columns } = getArrayLayout(shape);
   const gridColumns = shape.length === 4 ? Math.min(cubeCount, 3) : 1;
@@ -355,6 +368,7 @@ export function normalizeCubeState(value: unknown): CubeState {
     arrays,
     activeArrayId,
     interactionMode: stored.interactionMode === "move" ? "move" : "rotate",
+    cellLabelMode: stored.cellLabelMode === "index" ? "index" : "value",
     frontNumbersOnly: stored.frontNumbersOnly === true,
     rotation,
     zoom: Number.isFinite(stored.zoom)
@@ -513,12 +527,13 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
       index,
       cube,
       layer,
+      indexLabel: formatIndexLabel(index, item.shape),
       value: item.values ? formatImportedValue(item.values[index]) : formatValue(createValue(index, item.seed)),
       x: x + cubeOffsetX,
       y: y + cubeOffsetY,
       z,
     };
-  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.seed, item.values, layers, rows, totalCells]);
+  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.seed, item.shape, item.values, layers, rows, totalCells]);
 
   const labelOffset = (Math.max(rows, layers) * state.spacing * state.zoom) / 2 + 52;
   const wrapperStyle = {
@@ -530,6 +545,7 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
     <div
       className={`array-object${state.activeArrayId === item.id ? " is-active" : ""}`}
       data-array-id={item.id}
+      data-label-mode={state.cellLabelMode}
       data-source-name={item.sourceName ?? "随机数组"}
       style={wrapperStyle}
     >
@@ -553,12 +569,15 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
             data-layer={cell.layer}
             data-selected={highlightedIndices.has(cell.index) ? "true" : "false"}
             data-value={cell.value}
+            data-index-label={cell.indexLabel}
             key={cell.key}
             style={{ transform: `translate3d(${cell.x * state.spacing}px, ${cell.y * state.spacing}px, ${cell.z * state.spacing}px)` }}
           >
             {faces.map((face) => (
               <div className={`cell-face ${face}`} data-face={face} key={face}>
-                {(!state.frontNumbersOnly || face === "front") && <span>{cell.value}</span>}
+                {(!state.frontNumbersOnly || face === "front") && (
+                  <span>{state.cellLabelMode === "index" ? cell.indexLabel : cell.value}</span>
+                )}
               </div>
             ))}
           </div>

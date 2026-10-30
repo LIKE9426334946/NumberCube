@@ -55,6 +55,7 @@ export default function ControlPage() {
   const { layers } = getArrayLayout(activeArray.shape);
   const totalCells = activeArray.shape.reduce((total, size) => total * size, 1);
   const hiddenLayers = new Set(activeArray.hiddenLayers);
+  const cellLabelName = state.cellLabelMode === "index" ? "编号" : "数字";
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -412,7 +413,7 @@ export default function ControlPage() {
             <div className="saved-scenes-heading">
               <div>
                 <p id="saved-scenes-title">保存的场景</p>
-                <span>保存当前全部数组、位置、视角、切片和隐藏状态，点击场景即可恢复。</span>
+                <span>保存当前全部数组、位置、视角、切片、隐藏状态和编号显示设置，点击场景即可恢复。</span>
               </div>
               <strong>{savedScenes.length} 个场景</strong>
             </div>
@@ -670,6 +671,31 @@ export default function ControlPage() {
             <InteractionModeSwitch state={state} setState={setState} />
           </div>
 
+          <section className="interaction-control-panel" aria-labelledby="cell-label-title">
+            <div>
+              <p id="cell-label-title">单元显示内容</p>
+              <span>编号按数组索引从 0 开始，例如三维的 x211 对应 (2, 1, 1)；切换不改变原始数据。</span>
+            </div>
+            <div className="mode-switch" role="group" aria-label="单元显示模式">
+              <button
+                type="button"
+                className={state.cellLabelMode === "value" ? "is-active" : ""}
+                aria-pressed={state.cellLabelMode === "value"}
+                onClick={() => setState((current) => ({ ...current, cellLabelMode: "value" }))}
+              >
+                显示数值
+              </button>
+              <button
+                type="button"
+                className={state.cellLabelMode === "index" ? "is-active" : ""}
+                aria-pressed={state.cellLabelMode === "index"}
+                onClick={() => setState((current) => ({ ...current, cellLabelMode: "index" }))}
+              >
+                显示编号
+              </button>
+            </div>
+          </section>
+
           <div className="controls" aria-label="视图控制">
             <label className="spacing-control">
               <span>单元间距</span>
@@ -701,7 +727,7 @@ export default function ControlPage() {
               onClick={() => setState((current) => ({ ...current, frontNumbersOnly: !current.frontNumbersOnly }))}
             >
               <span aria-hidden="true">▣</span>
-              {state.frontNumbersOnly ? "显示全部面数字" : "只显示左面数字"}
+              {state.frontNumbersOnly ? `显示全部面${cellLabelName}` : `只显示左面${cellLabelName}`}
             </button>
           </div>
 
