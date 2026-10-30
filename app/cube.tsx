@@ -37,6 +37,7 @@ export type CubeState = {
   activeArrayId: string;
   interactionMode: InteractionMode;
   cellLabelMode: CellLabelMode;
+  symbolicSum: SymbolicProduct | null;
   frontNumbersOnly: boolean;
   rotation: Rotation;
   zoom: number;
@@ -95,6 +96,7 @@ export const defaultCubeState: CubeState = {
   activeArrayId: defaultArrayId,
   interactionMode: "rotate",
   cellLabelMode: "value",
+  symbolicSum: null,
   frontNumbersOnly: false,
   rotation: { ...defaultRotation },
   zoom: 0.95,
@@ -266,6 +268,20 @@ export function getProductTerms(product: SymbolicProduct) {
   return product.left.indices.map((_, index) => getProductFactors(product, index).join(" × "));
 }
 
+export function getProductSum(product: SymbolicProduct) {
+  return getProductTerms(product).join(" + ");
+}
+
+export function generateSymbolicSum(state: CubeState, leftId: string, rightId: string): CubeState | { error: string } {
+  const left = state.arrays.find((item) => item.id === leftId);
+  const right = state.arrays.find((item) => item.id === rightId);
+  if (!left || !right) return { error: "请选择两个已高亮的数组。" };
+  const product = getHighlightedProduct(left, right);
+  if ("error" in product) return product;
+  // Keep every array, selection, position and the active array unchanged.
+  return { ...state, symbolicSum: product.symbolicProduct };
+}
+
 function normalizeProductOperand(value: unknown): ProductOperand | null {
   if (!value || typeof value !== "object") return null;
   const stored = value as Partial<ProductOperand>;
@@ -284,7 +300,7 @@ function normalizeProductOperand(value: unknown): ProductOperand | null {
   };
 }
 
-function normalizeSymbolicProduct(value: unknown, resultShape: number[]): SymbolicProduct | null {
+function normalizeSymbolicProduct(value: unknown, resultShape?: number[]): SymbolicProduct | null {
   if (!value || typeof value !== "object") return null;
   const stored = value as Partial<SymbolicProduct>;
   const left = normalizeProductOperand(stored.left);
@@ -293,7 +309,7 @@ function normalizeSymbolicProduct(value: unknown, resultShape: number[]): Symbol
   const leftSlice = parseSliceExpression(left.sliceExpression, left.shape);
   const rightSlice = parseSliceExpression(right.sliceExpression, right.shape);
   if ("error" in leftSlice || "error" in rightSlice || !sameShape(leftSlice.shape, rightSlice.shape)
-    || !sameShape(resultShape, leftSlice.shape.length ? leftSlice.shape : [1])) return null;
+    || (resultShape && !sameShape(resultShape, leftSlice.shape.length ? leftSlice.shape : [1]))) return null;
   return { left, right };
 }
 
@@ -479,6 +495,7 @@ export function normalizeCubeState(value: unknown): CubeState {
     activeArrayId,
     interactionMode: stored.interactionMode === "move" ? "move" : "rotate",
     cellLabelMode: stored.cellLabelMode === "index" ? "index" : "value",
+    symbolicSum: normalizeSymbolicProduct(stored.symbolicSum),
     frontNumbersOnly: stored.frontNumbersOnly === true,
     rotation,
     zoom: Number.isFinite(stored.zoom)
@@ -600,6 +617,56 @@ export function InteractionModeSwitch({ state, setState }: { state: CubeState; s
   );
 }
 
+export async function copySymbolicText(text: string, field: HTMLTextAreaElement | null): Promise<boolean> {
+  if (typeof navigator !== "undefined" && typeof window !== "undefined" && window.isSecureContext
+    && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch { /* Fall back to a user-initiated selection copy, also supported on HTTP. */ }
+  }
+  if (!field || typeof document === "undefined") return false;
+  field.focus({ preventScroll: true });
+  field.select();
+  field.setSelectionRange(0, text.length);
+  try {
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  }
+}
+
+export function SymbolicSumResult({ product, onClear }: { product: SymbolicProduct; onClear?: () => void }) {
+  const expression = getProductSum(product);
+  const field = useRef<HTMLTextAreaElement | null>(null);
+  const [feedback, setFeedback] = useState<{ expression: string; message: string } | null>(null);
+  const copyResult = async () => {
+    const copied = await copySymbolicText(expression, field.current);
+    setFeedback({ expression, message: copied ? "已复制完整表达式。" : "自动复制未成功，请选中表达式后按 Ctrl+C（Mac：⌘C）复制。" });
+  };
+  return (
+    <section className="symbolic-sum-result" aria-label="符号乘积求和结果">
+      <div className="sum-result-heading">
+        <strong>乘积求和式 · {product.left.indices.length} 项</strong>
+        {onClear && <button type="button" onClick={onClear}>清除结果</button>}
+      </div>
+      <p className="product-source">{product.left.sourceName} · {product.left.sliceExpression}<br />{product.right.sourceName} · {product.right.sliceExpression}</p>
+      <textarea
+        ref={field}
+        className="product-sum sum-expression"
+        aria-label="乘积求和表达式"
+        value={expression}
+        readOnly
+        rows={5}
+        wrap="soft"
+        spellCheck={false}
+      />
+      <button type="button" className="product-generate sum-copy-button" onClick={() => void copyResult()}>一键复制结果</button>
+      <p className="product-status" role="status">{feedback?.expression === expression ? feedback.message : "完整符号表达式，可全选复制；不使用省略号。"}</p>
+    </section>
+  );
+}
+
 export function SymbolicProductDetails({ product }: { product: SymbolicProduct }) {
   const terms = getProductTerms(product);
   return (
@@ -610,8 +677,7 @@ export function SymbolicProductDetails({ product }: { product: SymbolicProduct }
       <ol className="product-term-list">
         {terms.map((term, index) => <li key={index}><code>{term}</code></li>)}
       </ol>
-      <p className="product-sum-label">乘积之和</p>
-      <code className="product-sum">{terms.join(" + ")}</code>
+      <SymbolicSumResult product={product} />
     </details>
   );
 }

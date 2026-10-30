@@ -14,9 +14,14 @@ const compiled = ts.transpileModule(readFileSync(new URL("../app/cube.tsx", impo
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
 });
 const module = { exports: {} };
-runInNewContext(compiled.outputText, { module, exports: module.exports, require: createRequire(import.meta.url) });
+const runtime = {
+  module, exports: module.exports, require: createRequire(import.meta.url),
+  window: { isSecureContext: false }, navigator: {}, document: { execCommand: () => false },
+};
+runInNewContext(compiled.outputText, runtime);
 const { CubeStage, SymbolicProductDetails, createArrayItem, defaultCubeState, getHighlightedProduct,
-  getHighlightedSelection, getProductTerms, normalizeCubeState, parseSliceExpression } = module.exports;
+  getHighlightedSelection, getProductTerms, getProductSum, generateSymbolicSum, SymbolicSumResult,
+  copySymbolicText, normalizeCubeState, parseSliceExpression } = module.exports;
 const plain = (value) => JSON.parse(JSON.stringify(value));
 
 function selected(shape, expression, prefix = "x") {
@@ -146,6 +151,84 @@ test("symbolic results stay symbolic in numeric mode, support face visibility an
   assert.match(getHighlightedSelection(result).error, /原始数字数组/);
 });
 
+test("generating a sum does not create blocks or alter any existing array or display setting", () => {
+  const { x, w } = example();
+  const state = normalizeCubeState({ ...defaultCubeState, arrays:[x,w], activeArrayId:w.id });
+  const before = plain(state);
+  const generated = generateSymbolicSum(state,x.id,w.id);
+  assert.ok(!("error" in generated));
+  assert.equal(generated.arrays.length, 2);
+  assert.deepEqual(plain({ ...generated, symbolicSum:null }), before);
+  assert.deepEqual(plain(state), before);
+  const expression = getProductSum(generated.symbolicSum);
+  assert.equal(expression.split(" + ").length, 12);
+  assert.ok(expression.startsWith("x0000 × w0000 + x0001 × w0001"));
+  assert.ok(expression.endsWith("x0211 × w0211"));
+  assert.doesNotMatch(expression, /…|\.\.\./);
+  assert.deepEqual(plain(normalizeCubeState(plain(generated))), plain(generated));
+});
+
+test("sum generation still works at the eight-array limit and invalid inputs do not change the old result", () => {
+  const { x,w } = example();
+  const extras = Array.from({length:6},(_,i)=>createArrayItem([1],i,{id:`extra-${i}`}));
+  const state = normalizeCubeState({...defaultCubeState,arrays:[x,w,...extras]});
+  const generated = generateSymbolicSum(state,x.id,w.id);
+  assert.equal(generated.arrays.length, 8);
+  assert.equal(getProductTerms(generated.symbolicSum).length, 12);
+  const before = plain(generated);
+  assert.match(generateSymbolicSum(generated,x.id,x.id).error,/两个不同/);
+  assert.match(generateSymbolicSum(generated,x.id,"missing").error,/请选择/);
+  assert.deepEqual(plain(generated),before);
+  assert.equal(normalizeCubeState({...generated,symbolicSum:{left:{},right:{}}}).symbolicSum,null);
+});
+
+test("the result renders all terms in a selectable text field with a one-click copy button", () => {
+  const {product} = example();
+  const html = renderToStaticMarkup(createElement(SymbolicSumResult,{product:product.symbolicProduct}));
+  assert.match(html,/<textarea[^>]*aria-label="乘积求和表达式"[^>]*readonly=""/i);
+  assert.match(html,/一键复制结果/);
+  assert.ok(html.includes(getProductSum(product.symbolicProduct)));
+  assert.equal((html.match(/ × /g) ?? []).length,12);
+});
+
+test("a maximum-size sum includes every one of the 216 terms without ellipsis", () => {
+  const x=selected([6,6,6],":","x");
+  const w=selected([6,6,6],":","w");
+  const product=getHighlightedProduct(x,w).symbolicProduct;
+  const sum=getProductSum(product);
+  assert.equal(sum.split(" + ").length,216);
+  assert.ok(sum.endsWith("x555 × w555"));
+  assert.doesNotMatch(sum,/…|\.\.\./);
+});
+
+test("copy uses the secure clipboard API when available", async () => {
+  const text=getProductSum(example().product.symbolicProduct);
+  let copied="";
+  runtime.window.isSecureContext=true;
+  runtime.navigator.clipboard={writeText:async value=>{copied=value;}};
+  assert.equal(await copySymbolicText(text,null),true);
+  assert.equal(copied,text);
+});
+
+test("copy supports HTTP selection fallback and reports failure instead of false success", async () => {
+  const text=getProductSum(example().product.symbolicProduct);
+  let selected=false;
+  let range;
+  const field={focus(){},select(){selected=true;},setSelectionRange(start,end){range=[start,end];}};
+  runtime.window.isSecureContext=false;
+  runtime.document.execCommand=command=>{assert.equal(command,"copy");return true;};
+  assert.equal(await copySymbolicText(text,field),true);
+  assert.equal(selected,true);
+  assert.deepEqual(range,[0,text.length]);
+  runtime.window.isSecureContext=true;
+  runtime.navigator.clipboard={writeText:async()=>{throw new Error("Unavailable");}};
+  assert.equal(await copySymbolicText(text,field),true);
+  runtime.document.execCommand=()=>false;
+  assert.equal(await copySymbolicText(text,field),false);
+  runtime.document.execCommand=()=>{throw new Error("Unsupported");};
+  assert.equal(await copySymbolicText(text,field),false);
+});
+
 test("production scene API saves, updates and restores symbolic products in the Node JSON store", async () => {
   const dataDir = await mkdtemp(join(tmpdir(), "numbercube-product-test-"));
   const previousDataDir = process.env.NUMBERCUBE_DATA_DIR;
@@ -158,7 +241,7 @@ test("production scene API saves, updates and restores symbolic products in the 
       method, headers: {"content-type":"application/json"}, ...(payload ? {body:JSON.stringify(payload)} : {}),
     }), env, context);
     const { x, w, result } = example();
-    const snapshot = normalizeCubeState({ ...defaultCubeState, arrays:[x,w,result], activeArrayId:result.id });
+    const snapshot = normalizeCubeState(generateSymbolicSum({ ...defaultCubeState, arrays:[x,w,result], activeArrayId:result.id },x.id,w.id));
     const created = await call("POST", {name:"Symbolic product QA", snapshot});
     assert.equal(created.status, 201);
     const {scene} = await created.json();
@@ -170,6 +253,7 @@ test("production scene API saves, updates and restores symbolic products in the 
     const restored = normalizeCubeState(JSON.parse(payload.scenes[0].snapshot));
     assert.deepEqual(plain(restored), plain(snapshot));
     assert.equal(getProductTerms(restored.arrays[2].symbolicProduct)[11], "x0211 × w0211");
+    assert.equal(getProductSum(restored.symbolicSum),getProductSum(snapshot.symbolicSum));
     assert.match(await readFile(join(dataDir,"saved-scenes.json"),"utf8"), /symbolicProduct/);
   } finally {
     if (previousDataDir === undefined) delete process.env.NUMBERCUBE_DATA_DIR;

@@ -10,6 +10,7 @@ import {
   defaultRotation,
   formatIndexLabel,
   formatShape,
+  generateSymbolicSum,
   getActiveArray,
   getArrayLayout,
   getFitZoom,
@@ -23,6 +24,7 @@ import {
   parseSliceExpression,
   SceneBadge,
   SymbolicProductDetails,
+  SymbolicSumResult,
   useCubeState,
 } from "../cube";
 import type { ArrayItem } from "../cube";
@@ -73,9 +75,7 @@ export default function ControlPage() {
   const productPreview = leftOperand && rightOperand
     ? getHighlightedProduct(leftOperand, rightOperand)
     : { error: "请先分别选中两个数组，为它们设置切片高亮。" };
-  const productError = state.arrays.length >= maxArrays
-    ? `场景最多支持 ${maxArrays} 个数组，请先删除一个数组再生成结果。`
-    : "error" in productPreview ? productPreview.error : "";
+  const productError = "error" in productPreview ? productPreview.error : "";
   const selectedSlice = activeArray.highlightedIndices.length && !activeArray.symbolicProduct
     ? getHighlightedSelection(activeArray) : null;
 
@@ -282,22 +282,10 @@ export default function ControlPage() {
   const generateProduct = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (productError || "error" in productPreview || !leftOperand || !rightOperand) return;
-    const result = createArrayItem(productPreview.shape, 0, {
-      sourceName: `${leftOperand.indexPrefix} × ${rightOperand.indexPrefix} · 符号结果`,
-      indexPrefix: "p",
-      symbolicProduct: productPreview.symbolicProduct,
-      position: {
-        x: (leftOperand.position.x + rightOperand.position.x) / 2,
-        y: Math.min(600, Math.max(...state.arrays.map((item) => item.position.y)) + 260),
-      },
-    });
-    setState((current) => ({
-      ...current,
-      arrays: [...current.arrays, result].slice(0, maxArrays),
-      activeArrayId: result.id,
-      cellLabelMode: "index",
-    }));
-    setProductStatus(`已生成 ${productPreview.symbolicProduct.left.indices.length} 个符号乘积，可在展示页移动结果方块。`);
+    const result = generateSymbolicSum(state, leftOperand.id, rightOperand.id);
+    if ("error" in result) return;
+    setState(result);
+    setProductStatus(`已生成 ${productPreview.symbolicProduct.left.indices.length} 项乘积的求和式，点击“一键复制结果”即可复制。`);
   };
 
   const toggleLayer = (layer: number) => {
@@ -478,7 +466,7 @@ export default function ControlPage() {
             <div className="saved-scenes-heading">
               <div>
                 <p id="saved-scenes-title">保存的场景</p>
-                <span>保存全部数组、符号相乘结果、位置、视角、切片与显示设置，点击场景即可恢复。</span>
+                <span>保存全部数组、乘积求和式、位置、视角、切片与显示设置，点击场景即可恢复。</span>
               </div>
               <strong>{savedScenes.length} 个场景</strong>
             </div>
@@ -725,8 +713,8 @@ export default function ControlPage() {
           <section className="selection-panel product-panel" aria-labelledby="product-title">
             <div className="selection-heading">
               <div>
-                <p id="product-title">高亮区域逐元素相乘</p>
-                <span>按切片后的对应位置配对，生成新的符号方块，不改变原始数值。</span>
+                <p id="product-title">高亮区域乘积求和</p>
+                <span>对应元素两两相乘，再把所有乘积相加，直接生成可复制的符号表达式。</span>
               </div>
             </div>
             <form className="product-form" onSubmit={generateProduct}>
@@ -760,10 +748,19 @@ export default function ControlPage() {
                   ? `形状匹配 ${formatShape(productPreview.shape)} · ${productPreview.symbolicProduct.left.indices.length} 对单元`
                   : "")}
               </p>
-              <p className="product-help">整数索引会去掉该维，范围切片保留该维；仅支持完全同形状，不进行广播。结果保留生成时的符号，切换数值显示不会替换它。</p>
-              <button type="submit" className="product-generate" disabled={Boolean(productError)}>生成符号乘积</button>
+              <p className="product-help">仅支持切片后形状完全相同，不进行广播。只生成一条完整求和式，不新增方块、不改变原数组；修改高亮或前缀后请重新生成。</p>
+              <button type="submit" className="product-generate" disabled={Boolean(productError)}>生成乘积求和式</button>
               {productStatus && <p className="product-status" role="status">{productStatus}</p>}
             </form>
+            {state.symbolicSum && (
+              <SymbolicSumResult
+                product={state.symbolicSum}
+                onClear={() => {
+                  setState((current) => ({ ...current, symbolicSum: null }));
+                  setProductStatus("");
+                }}
+              />
+            )}
           </section>
 
           <div className="slice-panel">
