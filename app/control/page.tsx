@@ -8,12 +8,14 @@ import {
   Brand,
   createArrayItem,
   defaultRotation,
+  formatIndexLabel,
   formatShape,
   getActiveArray,
   getArrayLayout,
   getFitZoom,
   InteractionModeSwitch,
   normalizeCubeState,
+  parseIndexPrefix,
   parseJsonArrayData,
   parseShapeInput,
   parseSliceExpression,
@@ -40,6 +42,8 @@ export default function ControlPage() {
   const [shapeInput, setShapeInput] = useState(activeArray.shape.join(","));
   const [error, setError] = useState("");
   const [jsonStatus, setJsonStatus] = useState("");
+  const [indexPrefixInput, setIndexPrefixInput] = useState(activeArray.indexPrefix);
+  const [indexPrefixError, setIndexPrefixError] = useState("");
   const [sliceInput, setSliceInput] = useState(activeArray.sliceExpression);
   const [sliceError, setSliceError] = useState("");
   const [savedScenes, setSavedScenes] = useState<SavedScene[]>([]);
@@ -63,6 +67,13 @@ export default function ControlPage() {
       setError("");
     });
   }, [activeArray.id, activeArray.shape]);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setIndexPrefixInput(activeArray.indexPrefix);
+      setIndexPrefixError("");
+    });
+  }, [activeArray.id, activeArray.indexPrefix]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -106,6 +117,18 @@ export default function ControlPage() {
       : dimensionCount === 3
         ? "矩阵面 / 第一个维度（左 → 右）"
         : "当前数组的矩阵面 / 第二维（左 → 右）";
+
+  const applyIndexPrefix = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const prefix = parseIndexPrefix(indexPrefixInput);
+    if (!prefix) {
+      setIndexPrefixError("请输入 1—12 位字母、数字或下划线，以字母或下划线开头，例如 x、w、conv1。");
+      return;
+    }
+    updateActiveArray((item) => ({ ...item, indexPrefix: prefix }));
+    setIndexPrefixInput(prefix);
+    setIndexPrefixError("");
+  };
 
   const generateMatrix = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -514,7 +537,7 @@ export default function ControlPage() {
             <div className="array-list-heading">
               <div>
                 <p id="array-list-title">场景中的数组</p>
-                <span>先选择一个数组，再修改它的形状、切片或矩阵面。</span>
+                <span>先选择一个数组，再修改它的编号前缀、形状、切片或矩阵面。</span>
               </div>
               <strong>{state.arrays.length} / {maxArrays}</strong>
             </div>
@@ -529,7 +552,7 @@ export default function ControlPage() {
                   >
                     <span>{index + 1}</span>
                     <strong>{item.sourceName ?? `随机数组 ${index + 1}`}</strong>
-                    <small>{formatShape(item.shape)} · {item.shape.reduce((total, size) => total * size, 1)} cells</small>
+                    <small>{item.indexPrefix} · {formatShape(item.shape)} · {item.shape.reduce((total, size) => total * size, 1)} cells</small>
                   </button>
                   {state.arrays.length > 1 && (
                     <button
@@ -544,6 +567,32 @@ export default function ControlPage() {
                 </div>
               ))}
             </div>
+            <form className="numpy-form" onSubmit={applyIndexPrefix}>
+              <label htmlFor="index-prefix-input">当前数组编号前缀</label>
+              <div className="expression-row">
+                <input
+                  id="index-prefix-input"
+                  value={indexPrefixInput}
+                  maxLength={12}
+                  onChange={(event) => {
+                    setIndexPrefixInput(event.target.value);
+                    setIndexPrefixError("");
+                  }}
+                  placeholder="例如 x、w、y"
+                  spellCheck="false"
+                  autoComplete="off"
+                  aria-describedby="index-prefix-status"
+                />
+                <button type="submit">应用前缀</button>
+              </div>
+              <p
+                id="index-prefix-status"
+                className={indexPrefixError ? "form-status is-error" : "form-status"}
+                aria-live="polite"
+              >
+                {indexPrefixError || `${activeArray.sourceName ?? "当前随机数组"} → ${formatIndexLabel(0, activeArray.shape, activeArray.indexPrefix)} · 只修改当前数组，显示编号时生效。`}
+              </p>
+            </form>
           </section>
 
           <form className="numpy-form" onSubmit={generateMatrix}>
@@ -674,7 +723,7 @@ export default function ControlPage() {
           <section className="interaction-control-panel" aria-labelledby="cell-label-title">
             <div>
               <p id="cell-label-title">单元显示内容</p>
-              <span>编号按数组索引从 0 开始，例如三维的 x211 对应 (2, 1, 1)；切换不改变原始数据。</span>
+              <span>编号使用每个数组各自的前缀，索引从 0 开始；在上方数组列表中选择数组后可修改前缀，切换不改变原始数据。</span>
             </div>
             <div className="mode-switch" role="group" aria-label="单元显示模式">
               <button

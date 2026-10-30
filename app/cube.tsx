@@ -14,6 +14,7 @@ export type ArrayItem = {
   seed: number;
   values: number[] | null;
   sourceName: string | null;
+  indexPrefix: string;
   hiddenLayers: number[];
   sliceExpression: string;
   highlightedIndices: number[];
@@ -56,6 +57,7 @@ export function createArrayItem(
     id?: string;
     values?: number[] | null;
     sourceName?: string | null;
+    indexPrefix?: string;
     position?: Position;
   } = {},
 ): ArrayItem {
@@ -65,6 +67,7 @@ export function createArrayItem(
     seed,
     values: options.values ?? null,
     sourceName: options.sourceName ?? null,
+    indexPrefix: parseIndexPrefix(options.indexPrefix) ?? "x",
     hiddenLayers: [],
     sliceExpression: "",
     highlightedIndices: [],
@@ -248,14 +251,19 @@ export function formatShape(shape: number[]) {
   return shape.length === 1 ? `(${shape[0]},)` : `(${shape.join(", ")})`;
 }
 
-export function formatIndexLabel(index: number, shape: number[]) {
+export function parseIndexPrefix(value: unknown) {
+  const prefix = typeof value === "string" ? value.trim() : "";
+  return /^[A-Za-z_][A-Za-z0-9_]{0,11}$/.test(prefix) ? prefix : null;
+}
+
+export function formatIndexLabel(index: number, shape: number[], prefix = "x") {
   const coordinates = new Array<number>(shape.length);
   let remainder = index;
   for (let dimension = shape.length - 1; dimension >= 0; dimension -= 1) {
     coordinates[dimension] = remainder % shape[dimension];
     remainder = Math.floor(remainder / shape[dimension]);
   }
-  return `x${coordinates.join("")}`;
+  return `${prefix}${coordinates.join("")}`;
 }
 
 export function getFitZoom(shape: number[]) {
@@ -311,6 +319,7 @@ function normalizeArrayItem(value: unknown, index: number, usedIds: Set<string>)
     seed: Number.isFinite(stored.seed) ? Number(stored.seed) : 11 + index,
     values,
     sourceName: values && typeof stored.sourceName === "string" ? stored.sourceName.slice(0, 120) : null,
+    indexPrefix: parseIndexPrefix(stored.indexPrefix) ?? "x",
     hiddenLayers,
     sliceExpression: highlightedIndices.length > 0 && typeof stored.sliceExpression === "string"
       ? stored.sliceExpression.slice(0, 160)
@@ -345,6 +354,7 @@ export function normalizeCubeState(value: unknown): CubeState {
       seed: stored.seed,
       values: stored.values,
       sourceName: stored.sourceName,
+      indexPrefix: stored.indexPrefix,
       hiddenLayers: stored.hiddenLayers,
       sliceExpression: stored.sliceExpression,
       highlightedIndices: stored.highlightedIndices,
@@ -527,13 +537,13 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
       index,
       cube,
       layer,
-      indexLabel: formatIndexLabel(index, item.shape),
+      indexLabel: formatIndexLabel(index, item.shape, item.indexPrefix),
       value: item.values ? formatImportedValue(item.values[index]) : formatValue(createValue(index, item.seed)),
       x: x + cubeOffsetX,
       y: y + cubeOffsetY,
       z,
     };
-  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.seed, item.shape, item.values, layers, rows, totalCells]);
+  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.indexPrefix, item.seed, item.shape, item.values, layers, rows, totalCells]);
 
   const labelOffset = (Math.max(rows, layers) * state.spacing * state.zoom) / 2 + 52;
   const wrapperStyle = {
@@ -546,6 +556,7 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
       className={`array-object${state.activeArrayId === item.id ? " is-active" : ""}`}
       data-array-id={item.id}
       data-label-mode={state.cellLabelMode}
+      data-index-prefix={item.indexPrefix}
       data-source-name={item.sourceName ?? "随机数组"}
       style={wrapperStyle}
     >
@@ -576,7 +587,12 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
             {faces.map((face) => (
               <div className={`cell-face ${face}`} data-face={face} key={face}>
                 {(!state.frontNumbersOnly || face === "front") && (
-                  <span>{state.cellLabelMode === "index" ? cell.indexLabel : cell.value}</span>
+                  <span
+                    style={state.cellLabelMode === "index" ? { fontSize: `${Math.min(10, 70 / cell.indexLabel.length)}px` } : undefined}
+                    title={state.cellLabelMode === "index" ? cell.indexLabel : undefined}
+                  >
+                    {state.cellLabelMode === "index" ? cell.indexLabel : cell.value}
+                  </span>
                 )}
               </div>
             ))}
