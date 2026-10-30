@@ -8,6 +8,16 @@ export type Position = { x: number; y: number };
 export type InteractionMode = "rotate" | "move";
 export type CellLabelMode = "value" | "index";
 
+export type ProductOperand = {
+  sourceName: string;
+  indexPrefix: string;
+  shape: number[];
+  sliceExpression: string;
+  indices: number[];
+};
+
+export type SymbolicProduct = { left: ProductOperand; right: ProductOperand };
+
 export type ArrayItem = {
   id: string;
   shape: number[];
@@ -15,6 +25,7 @@ export type ArrayItem = {
   values: number[] | null;
   sourceName: string | null;
   indexPrefix: string;
+  symbolicProduct: SymbolicProduct | null;
   hiddenLayers: number[];
   sliceExpression: string;
   highlightedIndices: number[];
@@ -58,6 +69,7 @@ export function createArrayItem(
     values?: number[] | null;
     sourceName?: string | null;
     indexPrefix?: string;
+    symbolicProduct?: SymbolicProduct;
     position?: Position;
   } = {},
 ): ArrayItem {
@@ -68,6 +80,7 @@ export function createArrayItem(
     values: options.values ?? null,
     sourceName: options.sourceName ?? null,
     indexPrefix: parseIndexPrefix(options.indexPrefix) ?? "x",
+    symbolicProduct: options.symbolicProduct ?? null,
     hiddenLayers: [],
     sliceExpression: "",
     highlightedIndices: [],
@@ -128,7 +141,7 @@ export function parseShapeInput(input: string) {
   return { shape };
 }
 
-type ParsedSlice = { expression: string; indices: number[] };
+type ParsedSlice = { expression: string; indices: number[]; shape: number[] };
 
 export function parseSliceExpression(input: string, shape: number[]): ParsedSlice | { error: string } {
   const original = input.trim().replaceAll("，", ",");
@@ -159,6 +172,7 @@ export function parseSliceExpression(input: string, shape: number[]): ParsedSlic
   while (tokens.length < shape.length) tokens.push(":");
 
   const selections: number[][] = [];
+  const resultShape: number[] = [];
   for (let dimension = 0; dimension < shape.length; dimension += 1) {
     const token = tokens[dimension];
     const size = shape[dimension];
@@ -189,6 +203,7 @@ export function parseSliceExpression(input: string, shape: number[]): ParsedSlic
     const indices: number[] = [];
     for (let index = start; index < stop; index += step) indices.push(index);
     selections.push(indices);
+    resultShape.push(indices.length);
   }
 
   let indices = [0];
@@ -197,7 +212,89 @@ export function parseSliceExpression(input: string, shape: number[]): ParsedSlic
   });
   if (indices.length === 0) return { error: "这个切片没有选中任何数据单元。" };
 
-  return { expression: `${arrayName}[${tokens.join(", ")}]`, indices };
+  return { expression: `${arrayName}[${tokens.join(", ")}]`, indices, shape: resultShape };
+}
+
+export function getHighlightedSelection(item: ArrayItem): ParsedSlice | { error: string } {
+  if (item.symbolicProduct) return { error: "请选择原始数字数组，暂不对符号结果继续相乘。" };
+  if (!item.highlightedIndices.length) return { error: "请先为这个数组设置切片高亮。" };
+  const selection = parseSliceExpression(item.sliceExpression, item.shape);
+  if ("error" in selection) return { error: "高亮区域的切片信息不完整，请重新应用切片。" };
+  const highlighted = new Set(item.highlightedIndices);
+  if (highlighted.size !== selection.indices.length || selection.indices.some((index) => !highlighted.has(index))) {
+    return { error: "高亮单元与切片不一致，请重新应用切片。" };
+  }
+  return selection;
+}
+
+function sameShape(left: number[], right: number[]) {
+  return left.length === right.length && left.every((size, index) => size === right[index]);
+}
+
+export function getHighlightedProduct(left: ArrayItem, right: ArrayItem):
+  { shape: number[]; symbolicProduct: SymbolicProduct } | { error: string } {
+  if (left.id === right.id) return { error: "请选择两个不同的数组。" };
+  const leftSelection = getHighlightedSelection(left);
+  if ("error" in leftSelection) return leftSelection;
+  const rightSelection = getHighlightedSelection(right);
+  if ("error" in rightSelection) return rightSelection;
+  if (!sameShape(leftSelection.shape, rightSelection.shape)) {
+    return { error: `高亮形状不相同：${formatShape(leftSelection.shape)} 与 ${formatShape(rightSelection.shape)}。请调整切片；不进行广播或仅按数量配对。` };
+  }
+  const operand = (item: ArrayItem, selection: ParsedSlice): ProductOperand => ({
+    sourceName: item.sourceName ?? "随机数组",
+    indexPrefix: item.indexPrefix,
+    shape: [...item.shape],
+    sliceExpression: selection.expression,
+    indices: [...selection.indices],
+  });
+  return {
+    // An all-integer slice is a scalar; the stage represents it with one block.
+    shape: leftSelection.shape.length ? [...leftSelection.shape] : [1],
+    symbolicProduct: { left: operand(left, leftSelection), right: operand(right, rightSelection) },
+  };
+}
+
+export function getProductFactors(product: SymbolicProduct, index: number): [string, string] {
+  return [
+    formatIndexLabel(product.left.indices[index], product.left.shape, product.left.indexPrefix),
+    formatIndexLabel(product.right.indices[index], product.right.shape, product.right.indexPrefix),
+  ];
+}
+
+export function getProductTerms(product: SymbolicProduct) {
+  return product.left.indices.map((_, index) => getProductFactors(product, index).join(" × "));
+}
+
+function normalizeProductOperand(value: unknown): ProductOperand | null {
+  if (!value || typeof value !== "object") return null;
+  const stored = value as Partial<ProductOperand>;
+  const prefix = parseIndexPrefix(stored.indexPrefix);
+  if (!prefix || !validShape(stored.shape) || typeof stored.sliceExpression !== "string"
+    || stored.sliceExpression.length > 160 || !Array.isArray(stored.indices)) return null;
+  const selection = parseSliceExpression(stored.sliceExpression, stored.shape);
+  if ("error" in selection || stored.indices.length !== selection.indices.length
+    || stored.indices.some((index, offset) => index !== selection.indices[offset])) return null;
+  return {
+    sourceName: typeof stored.sourceName === "string" ? stored.sourceName.slice(0, 120) : "随机数组",
+    indexPrefix: prefix,
+    shape: [...stored.shape],
+    sliceExpression: selection.expression,
+    indices: selection.indices,
+  };
+}
+
+function normalizeSymbolicProduct(value: unknown, resultShape: number[]): SymbolicProduct | null {
+  if (!value || typeof value !== "object") return null;
+  const stored = value as Partial<SymbolicProduct>;
+  const left = normalizeProductOperand(stored.left);
+  const right = normalizeProductOperand(stored.right);
+  if (!left || !right) return null;
+  const leftSlice = parseSliceExpression(left.sliceExpression, left.shape);
+  const rightSlice = parseSliceExpression(right.sliceExpression, right.shape);
+  if ("error" in leftSlice || "error" in rightSlice || !sameShape(leftSlice.shape, rightSlice.shape)
+    || !sameShape(resultShape, leftSlice.shape.length ? leftSlice.shape : [1])) return null;
+  return { left, right };
 }
 
 export type ParsedJsonArray = { shape: number[]; values: number[] };
@@ -292,7 +389,9 @@ function normalizeArrayItem(value: unknown, index: number, usedIds: Set<string>)
   const shape = stored.shape;
   const { layers } = getArrayLayout(shape);
   const totalCells = shape.reduce((total, size) => total * size, 1);
-  const values = Array.isArray(stored.values)
+  const symbolicProduct = normalizeSymbolicProduct(stored.symbolicProduct, shape);
+  if (stored.symbolicProduct != null && !symbolicProduct) return null;
+  const values = !symbolicProduct && Array.isArray(stored.values)
     && stored.values.length === totalCells
     && stored.values.every((item) => typeof item === "number" && Number.isFinite(item))
       ? stored.values
@@ -318,8 +417,9 @@ function normalizeArrayItem(value: unknown, index: number, usedIds: Set<string>)
     shape,
     seed: Number.isFinite(stored.seed) ? Number(stored.seed) : 11 + index,
     values,
-    sourceName: values && typeof stored.sourceName === "string" ? stored.sourceName.slice(0, 120) : null,
+    sourceName: (values || symbolicProduct) && typeof stored.sourceName === "string" ? stored.sourceName.slice(0, 120) : null,
     indexPrefix: parseIndexPrefix(stored.indexPrefix) ?? "x",
+    symbolicProduct,
     hiddenLayers,
     sliceExpression: highlightedIndices.length > 0 && typeof stored.sliceExpression === "string"
       ? stored.sliceExpression.slice(0, 160)
@@ -500,6 +600,22 @@ export function InteractionModeSwitch({ state, setState }: { state: CubeState; s
   );
 }
 
+export function SymbolicProductDetails({ product }: { product: SymbolicProduct }) {
+  const terms = getProductTerms(product);
+  return (
+    <details className="product-details">
+      <summary>查看 {terms.length} 项乘法与求和式</summary>
+      <p>对应位置逐元素相乘；下方求和对应一次窗口计算（不含偏置、不翻转卷积核）。</p>
+      <p className="product-source">{product.left.sourceName} · {product.left.sliceExpression}<br />{product.right.sourceName} · {product.right.sliceExpression}</p>
+      <ol className="product-term-list">
+        {terms.map((term, index) => <li key={index}><code>{term}</code></li>)}
+      </ol>
+      <p className="product-sum-label">乘积之和</p>
+      <code className="product-sum">{terms.join(" + ")}</code>
+    </details>
+  );
+}
+
 function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
   const dimensionCount = item.shape.length;
   const { cubeCount, layers, rows, columns } = getArrayLayout(item.shape);
@@ -538,12 +654,13 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
       cube,
       layer,
       indexLabel: formatIndexLabel(index, item.shape, item.indexPrefix),
+      factors: item.symbolicProduct ? getProductFactors(item.symbolicProduct, index) : null,
       value: item.values ? formatImportedValue(item.values[index]) : formatValue(createValue(index, item.seed)),
       x: x + cubeOffsetX,
       y: y + cubeOffsetY,
       z,
     };
-  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.indexPrefix, item.seed, item.shape, item.values, layers, rows, totalCells]);
+  }), [columns, cubeCount, cubeGridColumns, cubeGridRows, dimensionCount, item.indexPrefix, item.seed, item.shape, item.symbolicProduct, item.values, layers, rows, totalCells]);
 
   const labelOffset = (Math.max(rows, layers) * state.spacing * state.zoom) / 2 + 52;
   const wrapperStyle = {
@@ -555,7 +672,7 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
     <div
       className={`array-object${state.activeArrayId === item.id ? " is-active" : ""}`}
       data-array-id={item.id}
-      data-label-mode={state.cellLabelMode}
+      data-label-mode={item.symbolicProduct ? "symbolic" : state.cellLabelMode}
       data-index-prefix={item.indexPrefix}
       data-source-name={item.sourceName ?? "随机数组"}
       style={wrapperStyle}
@@ -572,6 +689,7 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
           <div
             className={[
               "number-cell",
+              item.symbolicProduct ? "is-symbolic-product" : "",
               hiddenLayers.has(cell.layer) ? "is-layer-hidden" : "",
               highlightedIndices.has(cell.index) ? "is-slice-selected" : "",
             ].filter(Boolean).join(" ")}
@@ -579,21 +697,31 @@ function ArrayObject({ item, state }: { item: ArrayItem; state: CubeState }) {
             data-cube={cell.cube}
             data-layer={cell.layer}
             data-selected={highlightedIndices.has(cell.index) ? "true" : "false"}
-            data-value={cell.value}
+            data-value={cell.factors ? undefined : cell.value}
+            data-expression={cell.factors?.join(" × ")}
             data-index-label={cell.indexLabel}
             key={cell.key}
             style={{ transform: `translate3d(${cell.x * state.spacing}px, ${cell.y * state.spacing}px, ${cell.z * state.spacing}px)` }}
           >
             {faces.map((face) => (
               <div className={`cell-face ${face}`} data-face={face} key={face}>
-                {(!state.frontNumbersOnly || face === "front") && (
+                {(!state.frontNumbersOnly || face === "front") && (cell.factors ? (
+                  <span
+                    className="symbolic-cell-label"
+                    style={{ fontSize: `${Math.min(10, 70 / Math.max(...cell.factors.map((factor) => factor.length)))}px` }}
+                    title={cell.factors.join(" × ")}
+                    aria-label={cell.factors.join(" × ")}
+                  >
+                    <b>{cell.factors[0]}</b><i aria-hidden="true">×</i><b>{cell.factors[1]}</b>
+                  </span>
+                ) : (
                   <span
                     style={state.cellLabelMode === "index" ? { fontSize: `${Math.min(10, 70 / cell.indexLabel.length)}px` } : undefined}
                     title={state.cellLabelMode === "index" ? cell.indexLabel : undefined}
                   >
                     {state.cellLabelMode === "index" ? cell.indexLabel : cell.value}
                   </span>
-                )}
+                ))}
               </div>
             ))}
           </div>
